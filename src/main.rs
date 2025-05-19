@@ -1,5 +1,7 @@
 mod routes;
+mod scenario;
 mod utils;
+
 use std::{fs::File, net::SocketAddr, path::Path, sync::Arc};
 
 use axum::{Router, body::Body, routing::get};
