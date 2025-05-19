@@ -5,7 +5,7 @@
 
 ## Roadmap
 - [X] AssetBundle Injection
-- [ ] Server control/monitoring
+- [X] Server control/monitoring (needs improvement)
 - [ ] CA/Certificate generation
 - [ ] Sekai Stories JSON conversion to Project Sekai proprietary story AssetBundle and back
 - [ ] Format for indexing and managing mods automatically
