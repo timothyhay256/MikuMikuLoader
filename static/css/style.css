@@ -201,3 +201,17 @@ input[type=submit]:hover {
     color: #f8f8f2;
     font-size: 36px;
 }
+
+#list {
+    text-align: center;
+    /* margin-top: 15; */
+    backdrop-filter: blur(7px) saturate(50%);
+    -webkit-backdrop-filter: blur(7px) saturate(50%);
+    background-color: rgba(111, 148, 225, 0.2);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.125);
+    width: 80%;
+    margin: auto;
+    /* margin-top: 10%; */
+    border-radius: 15px;
+}

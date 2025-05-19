@@ -15,6 +15,7 @@ dependencies = [
  "log",
  "sekai_injector",
  "serde",
+ "serde_json",
  "tokio",
  "toml",
  "tower-http",
@@ -1841,7 +1842,6 @@ dependencies = [
 [[package]]
 name = "sekai_injector"
 version = "0.1.0"
-source = "git+https://github.com/timothyhay256/Sekai-Injector.git#e528760bafd5a28ee56640491ecedf3ae05a62fd"
 dependencies = [
  "axum",
  "axum-extra",
@@ -1859,6 +1859,7 @@ dependencies = [
  "rcgen",
  "reqwest",
  "serde",
+ "serde_json",
  "time",
  "tokio",
  "toml",

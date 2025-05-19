@@ -1,20 +1,16 @@
+mod routes;
 mod utils;
-use std::{
-    fs::{self, File},
-    net::SocketAddr,
-    path::Path,
-    sync::Arc,
-};
+use std::{fs::File, net::SocketAddr, path::Path, sync::Arc};
 
 use axum::{Router, body::Body, routing::get};
 use colored::Colorize;
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use log::info;
-use sekai_injector::{Manager, load_injection_map, serve};
+use sekai_injector::{Manager, ServerStatistics, load_injection_map, serve};
 use std::io::Read;
 use tokio::{sync::RwLock, task};
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 
 #[tokio::main]
 async fn main() {
@@ -50,30 +46,9 @@ async fn main() {
     let injector_config_holder: sekai_injector::Config = toml::from_str(&injector_file_contents)
         .expect("The config file was not formatted properly and could not be read.");
 
-    let backend_task = task::spawn(sekai_injector_serve(injector_config_holder));
-
-    let webui_app = Router::new()
-        .route(
-            "/",
-            get(|| async { fs::read_to_string("static/index.html").unwrap() }),
-        )
-        .route(
-            "/server-status",
-            get(|| async { fs::read_to_string("static/server-status.html").unwrap() }),
-        )
-        .fallback_service(ServeDir::new("static"));
-
-    let webui_addr = SocketAddr::from(([0, 0, 0, 0], 3939));
-    let webui_server = axum_server::bind(webui_addr).serve(webui_app.into_make_service());
-
-    tokio::join!(backend_task, webui_server);
-}
-
-async fn sekai_injector_serve(config: sekai_injector::Config) {
-    info!("Starting sekai-injector server!");
     // We build the manager here so that it can be reused in other routes.
 
-    let injection_hashmap = load_injection_map(&config.resource_config);
+    let injection_hashmap = load_injection_map(&injector_config_holder.resource_config);
 
     // Create a client to handle making HTTPS requests
     let https = HttpsConnectorBuilder::new()
@@ -87,10 +62,40 @@ async fn sekai_injector_serve(config: sekai_injector::Config) {
     // Create manager containing our config and injection_hashmap and HTTPS client
     let manager = Arc::new(RwLock::new(Manager {
         injection_hashmap,
-        config,
+        config: injector_config_holder,
         client,
-        statistics: (0, 0),
+        statistics: ServerStatistics {
+            request_count: (0, 0),
+            requests: Vec::new(),
+        },
     }));
+
+    let backend_task = task::spawn(sekai_injector_serve(Arc::clone(&manager)));
+
+    let webui_app = Router::new()
+        .route_service("/", ServeFile::new("static/index.html"))
+        .route_service(
+            "/server-status",
+            ServeFile::new("static/server-status.html"),
+        )
+        .route("/total-passthrough", get(routes::total_passthrough))
+        .with_state(Arc::clone(&manager))
+        .route("/total-proxied", get(routes::total_proxied))
+        .with_state(Arc::clone(&manager))
+        .route("/total-requests", get(routes::requests))
+        .with_state(Arc::clone(&manager))
+        .route("/set-param/{:param}", get(routes::set_serve_param))
+        .with_state(manager)
+        .fallback_service(ServeDir::new("static"));
+
+    let webui_addr = SocketAddr::from(([0, 0, 0, 0], 3939));
+    let webui_server = axum_server::bind(webui_addr).serve(webui_app.into_make_service());
+
+    tokio::join!(backend_task, webui_server).0.unwrap();
+}
+
+async fn sekai_injector_serve(manager: Arc<RwLock<Manager>>) {
+    info!("Starting sekai-injector server!");
 
     serve(manager).await;
 }
