@@ -1,0 +1,203 @@
+h1 {
+    text-align: center;
+    font-family: "Noto Sans JP", Helvetica, sans-serif;
+    color: #f8f8f2;
+    font-size: 40px;
+}
+
+.box1 {
+    background-color: #000;
+    color: #fff;
+    opacity: .5;
+}
+
+#main-text {
+    color: #f8f8f2;
+    width: 95%;
+    text-align: center;
+    margin-left: auto;
+    margin-right: auto;
+    margin-top: auto;
+    height: 88vh;
+    font-family: "Noto Sans JP", Helvetica, sans-serif;
+    background-color: #44475a;
+    min-height: 100%;
+    background: linear-gradient(0deg, rgb(146, 76, 145), rgba(0, 0, 0, 0.2)), url(../images/open-sussy.jpg);
+    border: 5px solid rgba(245, 245, 255, .5);
+    background-size: cover;
+    border-radius: 12px;
+    color: #f8f8f2;
+    box-shadow: 10px 5px 5px rgba(0, 0, 0, .3);
+}
+
+
+#row-0 {
+    display: flex;
+    justify-content: space-evenly;
+    z-index: 1;
+}
+
+#row-1 {
+    display: flex;
+    justify-content: space-evenly;
+    z-index: 1;
+}
+
+#controls {
+    display: flex;
+    justify-content: center;
+}
+
+ul.c-ul {
+    display: inline-block;
+    text-align: left;
+}
+
+a {
+    color: #ff79c6;
+}
+
+#glass {
+    background: rgba(255, 255, 255, 0.25);
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.dropbtn {
+    background-color: #e594a4;
+    color: white;
+    padding: 16px;
+    font-size: 16px;
+    border: none;
+}
+
+.dropdown {
+    position: relative;
+    display: inline-block;
+    margin-left: 3%;
+}
+
+.dropdown-content {
+    display: none;
+    position: absolute;
+    background-color: #e594a4;
+    min-width: 160px;
+    box-shadow: 0px 8px 16px 0px rgba(0, 0, 0, 0.2);
+    z-index: 1;
+    font-family: "Noto Sans JP", Helvetica, sans-serif;
+    border-radius: 8px;
+    -webkit-transition: all 0.3s ease;
+    -moz-transition: all 0.3s ease;
+    -ms-transition: all 0.3s ease;
+    -o-transition: all 0.3s ease;
+    transition: all 0.3s ease;
+}
+
+.dropdown-content a {
+    color: white;
+    padding: 12px 16px;
+    text-decoration: none;
+    display: block;
+
+}
+
+.dropdown-content a:hover {
+    background-color: #b3727f;
+    border-radius: 8px;
+}
+
+.dropdown:hover .dropdown-content {
+    display: block;
+    opacity: 1;
+    pointer-events: all;
+}
+
+.dropdown:hover .dropbtn {
+    background-color: #b3727f;
+}
+
+button {
+    background-color: #e594a4;
+    border: none;
+    color: white;
+    padding: 15px 32px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 16px;
+    margin: 4px 2px;
+    cursor: pointer;
+    -webkit-transition-duration: 0.4s;
+    /* Safari */
+    transition-duration: 0.4s;
+    border-radius: 8px;
+}
+
+button:hover {
+    background-color: #b3727f;
+    color: white;
+    box-shadow: 0 12px 16px 0 rgba(0, 0, 0, 0.24), 0 17px 50px 0 rgba(0, 0, 0, 0.19);
+}
+
+input,
+select {
+    /* width: 100%; */
+    padding: 12px 20px;
+    height: 15%;
+    margin: 8px 0;
+    display: inline-block;
+    border: 0px solid #232634;
+    border-radius: 8px;
+    box-sizing: border-box;
+    background-color: #e594a4;
+    border: none;
+    color: white;
+    padding: 15px 32px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 17px;
+    margin: 4px 2px;
+    cursor: pointer;
+    box-shadow: 0;
+    transition: box-shadow 1s;
+    border-radius: 8px;
+}
+
+
+select option[value="attention"] {
+    background: #e594a4;
+    border-radius: 8px;
+}
+
+select option[value="meditation"] {
+    background: #e594a4;
+    border-radius: 8px;
+}
+
+
+input[type=submit] {
+    /* width: 100%; */
+    height: 15%;
+    background-color: #e594a4;
+    color: white;
+    padding: 14px 20px;
+    margin: 8px 0;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+input[type=submit]:hover {
+    background-color: #b3727f;
+}
+
+#control-text {
+    margin: 9px 0px;
+    font-family: "Noto Sans JP", Helvetica, sans-serif;
+    color: #f8f8f2;
+    font-size: 36px;
+}
