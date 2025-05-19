@@ -1,0 +1,7 @@
+map = [
+    [
+        "/3.5.1.0/bd3262f3-34ab-401d-bf97-be9f427484d5/android/event_story/event_whip_2024/scenario",
+        "injections/whip-2024-scenario-override-encrypted",
+        true,
+    ],
+]
