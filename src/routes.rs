@@ -68,6 +68,10 @@ pub async fn return_local_ip() -> impl IntoResponse {
     local_ip().unwrap().to_string()
 }
 
+pub async fn return_version() -> impl IntoResponse {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 pub async fn gen_cert(Json(payload): Json<CertGenOptions>) -> impl IntoResponse {
     debug!(
         "Received cert generation request at gen_cert endpoint: {:?}",

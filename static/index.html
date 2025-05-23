@@ -47,6 +47,20 @@
   </div> -->
         </div>
         <footer>
-            <p style="color: #f1fa8c; bottom: 0;">Made by James Hoffman</p>
+            <p style="color: #f1fa8c; bottom: 0;" id="version"></p>
         </footer>
+
+        <script>
+            fetch('/version')
+                .then(response => response.text())
+                .then(version => {
+                    const versionElement = document.getElementById('version');
+                    if (versionElement) {
+                        versionElement.textContent = `MikuMikuLoader v${version}`;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching version:', error);
+                });
+        </script>
 </body>

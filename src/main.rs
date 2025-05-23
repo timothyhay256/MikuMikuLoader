@@ -13,13 +13,13 @@ use colored::Colorize;
 use gumdrop::Options;
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
-use log::{LevelFilter, info, warn};
+use log::{info, warn};
 use notify_rust::Notification;
 use sekai_injector::{Manager, ServerStatistics, load_injection_map, serve};
 use std::io::Read;
 use tokio::{sync::RwLock, task};
 use tower_http::services::{ServeDir, ServeFile};
-use tracing_subscriber::{EnvFilter, fmt};
+use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Options)]
 struct CommandOptions {
@@ -138,12 +138,15 @@ async fn main() {
         .route("/generate-ca", post(routes::gen_ca))
         .route("/generate-cert", post(routes::gen_cert))
         .route("/local-ip", get(routes::return_local_ip))
+        .route("/version", get(routes::return_version))
         .with_state(Arc::clone(&manager));
 
     let webui_app = static_routes.merge(api_routes);
 
     let webui_addr = SocketAddr::from(([0, 0, 0, 0], 3939));
     let webui_server = axum_server::bind(webui_addr).serve(webui_app.into_make_service());
+
+    info!("MikuMikuLoader running at http://127.0.0.1:3939");
 
     if sekai_injector_enabled {
         let backend_task = task::spawn(sekai_injector_serve(Arc::clone(&manager)));

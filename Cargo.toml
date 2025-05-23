@@ -8,7 +8,7 @@ env_logger = "0.11.8"
 log = "0.4.27"
 serde = "1.0.219"
 toml = "0.8.22"
-sekai_injector = { path = "/home/pretty/projects/ProjectSekai-Repacked/sekai-injector" }
+sekai_injector = { git = "https://github.com/timothyhay256/Sekai-Injector" }
 colored = "3.0.0"
 tokio = "1.45.0"
 axum = "0.8.4"
