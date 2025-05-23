@@ -4,25 +4,51 @@ mod utils;
 
 use std::{fs::File, net::SocketAddr, path::Path, sync::Arc};
 
-use axum::{Router, body::Body, routing::get};
+use axum::{
+    Router,
+    body::Body,
+    routing::{get, post},
+};
 use colored::Colorize;
+use gumdrop::Options;
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
-use log::info;
+use log::{LevelFilter, info, warn};
+use notify_rust::Notification;
 use sekai_injector::{Manager, ServerStatistics, load_injection_map, serve};
 use std::io::Read;
 use tokio::{sync::RwLock, task};
 use tower_http::services::{ServeDir, ServeFile};
+use tracing_subscriber::{EnvFilter, fmt};
+
+#[derive(Debug, Options)]
+struct CommandOptions {
+    #[options(help = "print help message")]
+    help: bool,
+    #[options(help = "be verbose")]
+    verbose: bool,
+    #[options(help = "specify a specific config file")]
+    config: Option<String>,
+}
 
 #[tokio::main]
 async fn main() {
-    env_logger::Builder::new()
-        .filter_level(log::LevelFilter::Info)
+    let opts = CommandOptions::parse_args_default_or_exit();
+
+    tracing_subscriber::fmt()
+        .with_env_filter(if opts.verbose {
+            EnvFilter::new("debug,dbus=warn,zbus=warn,tracing=warn") // notify_rust is very verbose otherwise
+        } else {
+            EnvFilter::new("info,dbus=warn,zbus=warn,tracing=warn")
+        })
         .init();
 
     info!("{}", "ハローセカイ!".green());
 
-    let config_path = Path::new("MikuMiku.toml");
+    let config_path = match opts.config {
+        Some(config) => config,
+        None => "MikuMiku.toml".to_string(),
+    };
 
     let mut config_file_contents = String::new();
     let mut config_file =
@@ -48,6 +74,28 @@ async fn main() {
     let injector_config_holder: sekai_injector::Config = toml::from_str(&injector_file_contents)
         .expect("The config file was not formatted properly and could not be read.");
 
+    let mut sekai_injector_enabled = true;
+
+    for path in [
+        &injector_config_holder.server_cert,
+        &injector_config_holder.server_key,
+    ] {
+        if !Path::new(path).exists() {
+            let message = format!(
+                "{path} does not exist! Sekai-injector won't start yet. Once you have generated the certificates, restart the program."
+            );
+
+            warn!("{message}");
+            Notification::new()
+                .summary("MikuMikuLoader")
+                .body(&message)
+                .show()
+                .unwrap();
+
+            sekai_injector_enabled = false;
+        }
+    }
+
     // We build the manager here so that it can be reused in other routes.
 
     let injection_hashmap = load_injection_map(&injector_config_holder.resource_config);
@@ -72,28 +120,37 @@ async fn main() {
         },
     }));
 
-    let backend_task = task::spawn(sekai_injector_serve(Arc::clone(&manager)));
-
-    let webui_app = Router::new()
+    let static_routes = Router::new()
         .route_service("/", ServeFile::new("static/index.html"))
         .route_service(
             "/server-status",
             ServeFile::new("static/server-status.html"),
         )
-        .route("/total-passthrough", get(routes::total_passthrough))
-        .with_state(Arc::clone(&manager))
-        .route("/total-proxied", get(routes::total_proxied))
-        .with_state(Arc::clone(&manager))
-        .route("/total-requests", get(routes::requests))
-        .with_state(Arc::clone(&manager))
-        .route("/set-param/{:param}", get(routes::set_serve_param))
-        .with_state(manager)
+        .route_service("/custom-story", ServeFile::new("static/custom-story.html"))
+        .route_service("/cert-gen", ServeFile::new("static/certificate-gen.html"))
         .fallback_service(ServeDir::new("static"));
+
+    let api_routes = Router::new()
+        .route("/total-passthrough", get(routes::total_passthrough))
+        .route("/total-proxied", get(routes::total_proxied))
+        .route("/total-requests", get(routes::requests))
+        .route("/set-param/{:param}", get(routes::set_serve_param))
+        .route("/generate-ca", post(routes::gen_ca))
+        .route("/generate-cert", post(routes::gen_cert))
+        .route("/local-ip", get(routes::return_local_ip))
+        .with_state(Arc::clone(&manager));
+
+    let webui_app = static_routes.merge(api_routes);
 
     let webui_addr = SocketAddr::from(([0, 0, 0, 0], 3939));
     let webui_server = axum_server::bind(webui_addr).serve(webui_app.into_make_service());
 
-    tokio::join!(backend_task, webui_server).0.unwrap();
+    if sekai_injector_enabled {
+        let backend_task = task::spawn(sekai_injector_serve(Arc::clone(&manager)));
+        tokio::join!(backend_task, webui_server).0.unwrap();
+    } else {
+        tokio::join!(webui_server).0.unwrap();
+    }
 }
 
 async fn sekai_injector_serve(manager: Arc<RwLock<Manager>>) {
