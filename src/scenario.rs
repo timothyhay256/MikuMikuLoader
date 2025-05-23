@@ -36,7 +36,7 @@ pub struct ScenarioAdapterTalkData {
     special_effects: Vec<ScenarioAdapterSpecialEffect>,
     sound: Vec<ScenarioAdapterSoundData>,
 
-    need_bundle: ScenarioAdapterNeededBundles,
+    needed_bundles: ScenarioAdapterNeededBundles,
 }
 
 pub struct ScenarioAdapterTalkDataMotion {

@@ -5,6 +5,12 @@ h1 {
     font-size: 40px;
 }
 
+h2 {
+    text-align: center;
+    font-family: "Noto Sans JP", Helvetica, sans-serif;
+    color: #f8f8f2;
+}
+
 .box1 {
     background-color: #000;
     color: #fff;
@@ -18,7 +24,7 @@ h1 {
     margin-left: auto;
     margin-right: auto;
     margin-top: auto;
-    height: 88vh;
+    height: auto;
     font-family: "Noto Sans JP", Helvetica, sans-serif;
     background-color: #44475a;
     min-height: 100%;
@@ -214,4 +220,12 @@ input[type=submit]:hover {
     margin: auto;
     /* margin-top: 10%; */
     border-radius: 15px;
+}
+
+#cert {
+    width: auto;
+}
+
+label {
+    font-size: 25px;
 }

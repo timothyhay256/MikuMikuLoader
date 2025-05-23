@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>MikuMikuLoader Server</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+
+<body style="background-color: #33939c">
+    <h1 style="color: #f9c5ff;">Generate Certificates</h1>
+    <h2 style="color: #f9c5ff; margin-top: -1%;"><a style="text-decoration: none;" href="/">Home</a></h2>
+    <div id="main-text">
+        <h3 style="text-align: center; color:red; font-size: 30px;"><strong>IMPORTANT</strong></h3>
+        <p style="font-size: 20px; width: 40%; text-align: center; margin: 0 auto;"><strong>NEVER</strong> share any
+            .pem files that
+            this program generates,
+            or you risk
+            opening yourself up to
+            MITM attacks! Only ever install certificates that YOU generated, and revoke them if they are
+            compromised!
+        </p><br><br>
+        <form id="caForm">
+            <label><strong>CA Name</strong></label>
+            <input type="text" id="caname" value="Miku Certificate Authority">
+            <br>
+            <label><strong>CA Lifetime (days)</strong></label>
+            <input type="number" id="califetime" value="3650" style="width: 10%">
+            <br>
+            <label><strong>CA file name</strong></label>
+            <input type="text" id="cafilename" value="ca_cert.pem" style="width: 10%">
+            <br>
+            <label><strong>CA Key file name</strong></label>
+            <input type="text" id="cakeyname" value="ca_key.pem" style="width: 10%">
+            <br><br>
+            <button type="submit" style="font-size: 18px;" id="caButton">
+                <i class="fa fa-solid fa-sliders"></i> Generate CA Certificate
+            </button>
+        </form>
+        <br><br><br>
+        <form id="certForm">
+            <label><strong>Hostname to override</strong></label>
+            <input type="text" id="hostname" value="assetbundle.sekai-en.com">
+            <br>
+            <label><strong>IP address to point to</strong></label>
+            <input type="text" id="ip" value="127.0.0.1" style="width: 10%">
+            <br>
+            <label><strong>Certificate lifetime</strong></label>
+            <input type="number" id="certlifetime" value="3650" style="width: 10%">
+            <br>
+            <label><strong>CA file name</strong></label>
+            <input type="text" id="canameinput" value="ca_cert.pem" style="width: 10%">
+            <br>
+            <label><strong>CA Key file name</strong></label>
+            <input type="text" id="cakeyinput" value="ca_key.pem" style="width: 10%">
+            <br>
+            <label><strong>Certificate output name</strong></label>
+            <input type="text" id="certname" value="server_cert.pem" style="width: 10%">
+            <br>
+            <label><strong>Certificate Key output name</strong></label>
+            <input type="text" id="certkeyname" value="server_key.pem" style="width: 10%">
+            <br><br>
+            <button type="submit" style="font-size: 18px;" id="certButton">
+                <i class="fa fa-solid fa-sliders"></i> Generate Server Certificate
+            </button>
+            <br><br><br>
+        </form>
+
+    </div>
+
+    <script>
+        fetch('/local-ip')
+            .then(response => response.text())
+            .then(text => {
+                document.getElementById("ip").value = text;
+            })
+            .catch(error => {
+                console.error('Error fetching data:', error);
+            });
+
+
+        document.getElementById("caButton").addEventListener("click", function (event) {
+            event.preventDefault();
+
+            const caName = document.getElementById("caname").value;
+            const caLifetime = document.getElementById("califetime").value;
+            const caFileName = document.getElementById("cafilename").value;
+            const caKeyName = document.getElementById("cakeyname").value;
+
+
+            fetch("/generate-ca", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    ca_name: caName,
+                    ca_lifetime: parseInt(caLifetime),
+                    ca_file_name: caFileName,
+                    ca_key_name: caKeyName
+                })
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error("Network response was not ok");
+                    }
+
+                    return response.json();
+                })
+                .then(data => {
+                    alert(data);
+                })
+                .catch(error => {
+                    console.error("Error:", error);
+                    alert("There was an error generating the certificate.");
+                });
+        });
+
+        document.getElementById("certButton").addEventListener("click", function (event) {
+            event.preventDefault();
+
+            const hostname = document.getElementById("hostname").value;
+            const ip = document.getElementById("ip").value;
+            const certLifetime = document.getElementById("certlifetime").value;
+            const caNameInput = document.getElementById("canameinput").value;
+            const caKeyInput = document.getElementById("cakeyinput").value;
+            const certName = document.getElementById("certname").value;
+            const certKeyName = document.getElementById("certkeyname").value;
+
+            fetch("/generate-cert", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    hostname: hostname,
+                    ip: ip,
+                    cert_lifetime: parseInt(certLifetime),
+                    ca_name_input: caNameInput,
+                    ca_key_input: caKeyInput,
+                    cert_name: certName,
+                    cert_key_name: certKeyName
+                })
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error("Network response was not ok");
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    alert(data);
+                })
+                .catch(error => {
+                    console.error("Error:", error);
+                    alert("There was an error generating the certificate.");
+                });
+        });
+    </script>
+</body>
