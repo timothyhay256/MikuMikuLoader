@@ -2319,7 +2319,7 @@ dependencies = [
 [[package]]
 name = "sekai_injector"
 version = "0.1.0"
-source = "git+https://github.com/timothyhay256/Sekai-Injector#ffea46247369eb5ced6dce1e47f8f70f1a974af0"
+source = "git+https://github.com/timothyhay256/Sekai-Injector#b0e99b7a1f01dfd7837f09a1e2dc8b586966e719"
 dependencies = [
  "axum",
  "axum-extra",
@@ -2337,6 +2337,7 @@ dependencies = [
  "rcgen",
  "reqwest",
  "serde",
+ "serde_json",
  "time",
  "tokio",
  "toml",
