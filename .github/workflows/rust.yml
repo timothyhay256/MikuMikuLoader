@@ -70,15 +70,16 @@ jobs:
           mkdir -p .cargo
           if [ "${{ matrix.platform.target }}" = "x86_64-apple-darwin" ]; then
             cat > .cargo/config.toml <<EOF
-            [target.x86_64-apple-darwin]
-            linker = "x86_64-apple-darwin24.5-clang"
-            EOF
+          [target.x86_64-apple-darwin]
+          linker = "x86_64-apple-darwin24.5-clang"
+          EOF
           elif [ "${{ matrix.platform.target }}" = "aarch64-apple-darwin" ]; then
             cat > .cargo/config.toml <<EOF
-            [target.aarch64-apple-darwin]
-            linker = "aarch64-apple-darwin24.5-clang"
-            EOF
-          fi
+          [target.aarch64-apple-darwin]
+          linker = "aarch64-apple-darwin24.5-clang"
+          EOF
+            fi
+
 
       - name: Build with appropriate toolchain
         run: |
