@@ -27,7 +27,7 @@ jobs:
             target: aarch64-apple-darwin
             bin: figctl-darwin-arm64
         toolchain:
-          - stable
+          - nightly # Allows us to use all cores
     steps:
       - uses: actions/checkout@v3
       - name: Build binary
