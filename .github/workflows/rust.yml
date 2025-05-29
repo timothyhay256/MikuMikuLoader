@@ -20,17 +20,12 @@ jobs:
           - os_name: Windows-x86_64
             target: x86_64-pc-windows-msvc
             bin: figctl-amd64.exe
-          - os_name: macOS-x86_64
-            target: x86_64-apple-darwin
-            bin: figctl-darwin-amd64
-          - os_name: macOS-aarch64
-            target: aarch64-apple-darwin
-            bin: figctl-darwin-arm64
         toolchain:
-          - nightly # Allows us to use all cores
+          - nightly
     steps:
       - uses: actions/checkout@v3
-      - name: Build binary
+
+      - name: Build binary with cross
         uses: houseabsolute/actions-rust-cross@v0
         with:
           command: "build"
@@ -38,14 +33,20 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
           args: "--locked --release"
           strip: true
-      - name: Rename binary (linux and macos)
+
+      - name: Rename binary (Linux)
         run: mv target/${{ matrix.platform.target }}/release/figctl target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
-        if: matrix.platform.os_name != 'Windows-x86_64'
-      - name: Rename binary (windows)
+        if: matrix.platform.os_name == 'Linux-x86_64'
+
+      - name: Rename binary (Windows)
         run: mv target/${{ matrix.platform.target }}/release/figctl.exe target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
         if: matrix.platform.os_name == 'Windows-x86_64'
+
       - name: Generate SHA-256
-        run: shasum -a 256 target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }} | cut -d ' ' -f 1 > target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}.sha256
+        run: |
+          FILE=target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
+          shasum -a 256 "$FILE" | cut -d ' ' -f 1 > "$FILE.sha256"
+
       - name: Upload binary and SHA-256 checksum as build artifacts
         uses: actions/upload-artifact@v4
         with:
