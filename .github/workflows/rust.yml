@@ -16,10 +16,10 @@ jobs:
         platform:
           - os_name: Linux-x86_64
             target: x86_64-unknown-linux-gnu
-            bin: figctl-linux-amd64
+            bin: MikuMikuLoader-linux-amd64
           - os_name: Windows-x86_64
             target: x86_64-pc-windows-msvc
-            bin: figctl-amd64.exe
+            bin: MikuMikuLoader-amd64.exe
         toolchain:
           - nightly
     steps:
@@ -35,11 +35,11 @@ jobs:
           strip: true
 
       - name: Rename binary (Linux)
-        run: mv target/${{ matrix.platform.target }}/release/figctl target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
+        run: mv target/${{ matrix.platform.target }}/release/MikuMikuLoader target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
         if: matrix.platform.os_name == 'Linux-x86_64'
 
       - name: Rename binary (Windows)
-        run: mv target/${{ matrix.platform.target }}/release/figctl.exe target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
+        run: mv target/${{ matrix.platform.target }}/release/MikuMikuLoader target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
         if: matrix.platform.os_name == 'Windows-x86_64'
 
       - name: Generate SHA-256
