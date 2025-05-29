@@ -20,8 +20,12 @@ jobs:
           - os_name: Windows-x86_64
             target: x86_64-pc-windows-msvc
             bin: MikuMikuLoader-amd64.exe
+          - os_name: macOS-x86_64
+            target: x86_64-apple-darwin
+            bin: MikuMikuLoader-macos-amd64
         toolchain:
           - nightly
+
     steps:
       - uses: actions/checkout@v3
 
@@ -29,24 +33,48 @@ jobs:
         if: matrix.platform.os_name == 'Windows-x86_64'
         run: |
           cargo install --locked cargo-xwin
-          echo "Added cargo bin to PATH"
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Build with cargo-xwin (Windows) or cargo (Linux)
+      - name: Set up osxcross (macOS only)
+        if: matrix.platform.os_name == 'macOS-x86_64'
         run: |
-          if [ "${{ matrix.platform.os_name }}" = "Windows-x86_64" ]; then
-            cargo xwin build --target ${{ matrix.platform.target }} --release --locked
-          else
-            cargo build --target ${{ matrix.platform.target }} --release --locked
-          fi
+          echo "/opt/osxcross/target/bin" >> $GITHUB_PATH
+          echo "OSXCROSS_MP_INC=1" >> $GITHUB_ENV
+          echo "MACOSX_DEPLOYMENT_TARGET=10.13" >> $GITHUB_ENV
 
-      - name: Rename binary (Linux)
-        if: matrix.platform.os_name == 'Linux-x86_64'
-        run: mv target/${{ matrix.platform.target }}/release/MikuMikuLoader target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.platform.target }}
 
-      - name: Rename binary (Windows)
-        if: matrix.platform.os_name == 'Windows-x86_64'
-        run: mv target/${{ matrix.platform.target }}/release/MikuMikuLoader.exe target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
+      - name: Configure Cargo for macOS (only)
+        if: matrix.platform.os_name == 'macOS-x86_64'
+        run: |
+          mkdir -p .cargo
+          cat > .cargo/config.toml <<EOF
+          [target.${{ matrix.platform.target }}]
+          linker = "x86_64-apple-darwin20-clang"
+          EOF
+
+      - name: Build with appropriate toolchain
+        run: |
+          case "${{ matrix.platform.os_name }}" in
+            Windows-x86_64)
+              cargo xwin build --target ${{ matrix.platform.target }} --release --locked
+              ;;
+            *)
+              cargo build --target ${{ matrix.platform.target }} --release --locked
+              ;;
+          esac
+
+      - name: Rename binary
+        run: |
+          case "${{ matrix.platform.os_name }}" in
+            Windows-x86_64)
+              mv target/${{ matrix.platform.target }}/release/MikuMikuLoader.exe target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
+              ;;
+            *)
+              mv target/${{ matrix.platform.target }}/release/MikuMikuLoader target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
+              ;;
+          esac
 
       - name: Generate SHA-256
         run: |
