@@ -49,8 +49,6 @@ jobs:
           echo "CFLAGS=--target=x86_64-apple-darwin -fuse-ld=lld" >> $GITHUB_ENV
           echo "LDFLAGS=-fuse-ld=lld" >> $GITHUB_ENV
 
-
-
       - name: Add Rust target
         run: rustup target add ${{ matrix.platform.target }}
 
@@ -60,7 +58,7 @@ jobs:
           mkdir -p .cargo
           cat > .cargo/config.toml <<EOF
           [target.${{ matrix.platform.target }}]
-          linker = "x86_64-apple-darwin20-clang"
+          linker = "x86_64-apple-darwin24.5-clang"
           EOF
 
       - name: Build with appropriate toolchain
