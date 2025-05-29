@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Install cross-xwin (Windows only)
+      - name: Install cargo-xwin (Windows only)
         if: matrix.platform.os_name == 'Windows-x86_64'
         run: |
           cargo install --locked cross-xwin
@@ -35,7 +35,7 @@ jobs:
       - name: Build with cross-xwin (Windows) or cargo (Linux)
         run: |
           if [ "${{ matrix.platform.os_name }}" = "Windows-x86_64" ]; then
-            cross-xwin build --target ${{ matrix.platform.target }} --release --locked
+            cargo xwin build --target ${{ matrix.platform.target }} --release --locked
           else
             cargo build --target ${{ matrix.platform.target }} --release --locked
           fi
