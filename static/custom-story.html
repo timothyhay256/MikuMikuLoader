@@ -2,14 +2,50 @@
 <html>
 
 <head>
-    <title>MikuMikuLoader Server</title>
+    <title>MikuMikuLoader Custom Story Builder</title>
     <link rel="stylesheet" href="/css/style.css">
 </head>
 
 <body style="background-color: #33939c">
-    <h1 style="color: #f9c5ff;">Server Status</h1>
+    <a id="downloadAnchorElem" style="display:none"></a>
+
+    <h1 style="color: #f9c5ff;">Create Custom Story</h1>
     <h2 style="color: #f9c5ff; margin-top: -1%;"><a style="text-decoration: none;" href="/">Home</a></h2>
     <div id="main-text">
-        <h3 style="text-align: center"><br>Test</h3>
+        <br><br>
+        <label for="file-selector" style="font-size: 22px;">Import MikuMikuLoaderStory file (json)</label><br>
+        <input type="file" id="file-selector">
+        <br><br>
+        <h2 style="text-align: center">Create new custom story</h2>
+        <button id="add-scene-btn">Add Scene</button><br><br>
+        <div class="scrollmenu" id="scrollmenu">
+            <div id="scene-container-INDEX" style="display: none;">
+                <div id="modal-INDEX" class="modal">
+                    <div class="modal-content">
+                        <span class="close">&times;</span>
+                        <form id="form-INDEX">
+                            <p>Enter the scene JSON from SEKAI-Stories
+                            </p>
+                            <textarea oninput="auto_grow(this)" type="text" id="json-INDEX" cols="65" rows="20"
+                                placeholder="JSON goes here..."></textarea>
+                            <br><br>
+                            <button id="submit-INDEX">Save</button>
+                            <button id="remove-INDEX">Delete scene</button>
+                            <br><button id="reorder-INDEX">Set new
+                                index</button>
+                        </form>
+                    </div>
+                </div>
+                <button id="scene-INDEX">Scene 1<br>Click to add Sekai Stories JSON</button>
+            </div>
+        </div>
+        <br>
+        <input type="text" id="storyfile" value="CustomStory.json">
+        <button id="submit-scenes">Save scenes to JSON file</button>
+        <br>
+        <button id="generate-mod">Generate and export mod from scenes</button>
     </div>
+
+    <script src="/js/custom-story.js"></script>
+
 </body>

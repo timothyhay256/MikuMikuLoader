@@ -229,3 +229,86 @@ input[type=submit]:hover {
 label {
     font-size: 25px;
 }
+
+div.scrollmenu {
+    /* background-color: #333; */
+    overflow: auto;
+    white-space: nowrap;
+}
+
+div.scrollmenu a {
+    display: inline-block;
+    color: white;
+    text-align: center;
+    padding: 14px;
+    text-decoration: none;
+}
+
+div.scrollmenu a:hover {
+    background-color: #777;
+}
+
+#json-btn {
+    width: 15vw;
+    height: 15vh;
+}
+
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1;
+    padding-top: 100px;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgb(0, 0, 0, 0.2);
+}
+
+.modal-content {
+    background-color: #37696b;
+    margin: auto;
+    padding: 20px;
+    border: 1px solid #8ac1e0;
+    width: 50%;
+}
+
+.close {
+    color: #aaaaaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+}
+
+.close:hover,
+.close:focus {
+    color: #ff0000;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+textarea {
+    width: 100%;
+    height: 150px;
+    padding: 12px 20px;
+    box-sizing: border-box;
+    border: 2px solid #8ac1e0;
+    border-radius: 6px;
+    background-color: #37696b;
+    font-size: 16px;
+    resize: none;
+    overflow: hidden;
+    min-height: 50px;
+    max-height: 600px;
+}
+
+input::file-selector-button {
+    font-weight: bold;
+    color: #fff;
+    border-radius: 6px;
+    background-color: #e594a4;
+    padding: 0.5em;
+    border: thin solid #8ac1e0;
+    border-radius: 3px;
+}
