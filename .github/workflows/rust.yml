@@ -1,50 +1,55 @@
-name: Rust CI
+name: build
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+
+permissions:
+  contents: write
 
 jobs:
-  build-and-test:
+  build:
+    name: ${{ matrix.platform.os_name }} with rust ${{ matrix.toolchain }}
+    runs-on: self-hosted
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-
+        platform:
+          - os_name: Linux-x86_64
+            target: x86_64-unknown-linux-gnu
+            bin: figctl-linux-amd64
+          - os_name: Windows-x86_64
+            target: x86_64-pc-windows-msvc
+            bin: figctl-amd64.exe
+          - os_name: macOS-x86_64
+            target: x86_64-apple-darwin
+            bin: figctl-darwin-amd64
+          - os_name: macOS-aarch64
+            target: aarch64-apple-darwin
+            bin: figctl-darwin-arm64
+        toolchain:
+          - stable
     steps:
-    - name: Checkout source
-      uses: actions/checkout@v4
-
-    - name: Cache cargo registry
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
-
-    - name: Cache target directory
-      uses: actions/cache@v3
-      with:
-        path: target
-        key: ${{ runner.os }}-target-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-target-
-
-    - name: Build
-      run: cargo build --release --verbose
-
-    - name: Run tests
-      run: cargo test --verbose
-
-    - name: Upload binary artifact
-      if: success()
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ runner.os }}-binary
-        path: |
-          target/release/MikuMikuLoader
+      - uses: actions/checkout@v3
+      - name: Build binary
+        uses: houseabsolute/actions-rust-cross@v0
+        with:
+          command: "build"
+          target: ${{ matrix.platform.target }}
+          toolchain: ${{ matrix.toolchain }}
+          args: "--locked --release"
+          strip: true
+      - name: Rename binary (linux and macos)
+        run: mv target/${{ matrix.platform.target }}/release/figctl target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
+        if: matrix.platform.os_name != 'Windows-x86_64'
+      - name: Rename binary (windows)
+        run: mv target/${{ matrix.platform.target }}/release/figctl.exe target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
+        if: matrix.platform.os_name == 'Windows-x86_64'
+      - name: Generate SHA-256
+        run: shasum -a 256 target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }} | cut -d ' ' -f 1 > target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}.sha256
+      - name: Upload binary and SHA-256 checksum as build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform.target }}-artifacts
+          path: |
+            target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
+            target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}.sha256
