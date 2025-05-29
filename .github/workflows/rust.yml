@@ -28,11 +28,11 @@ jobs:
       - name: Install cargo-xwin (Windows only)
         if: matrix.platform.os_name == 'Windows-x86_64'
         run: |
-          cargo install --locked cross-xwin
+          cargo install --locked cargo-xwin
           echo "Added cargo bin to PATH"
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Build with cross-xwin (Windows) or cargo (Linux)
+      - name: Build with cargo-xwin (Windows) or cargo (Linux)
         run: |
           if [ "${{ matrix.platform.os_name }}" = "Windows-x86_64" ]; then
             cargo xwin build --target ${{ matrix.platform.target }} --release --locked
