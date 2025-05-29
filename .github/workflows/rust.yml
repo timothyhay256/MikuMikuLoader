@@ -28,7 +28,7 @@ jobs:
       - name: Install cross-xwin (Windows only)
         if: matrix.platform.os_name == 'Windows-x86_64'
         run: |
-          cargo install cross-xwin --force
+          cargo install --locked cross-xwin
           echo "Added cargo bin to PATH"
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
