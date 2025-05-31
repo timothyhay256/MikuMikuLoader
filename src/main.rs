@@ -202,6 +202,39 @@ async fn main() {
 
     info!("MikuMikuLoader running at http://0.0.0.0:3939");
 
+    match Notification::new()
+        .summary("MikuMikuLoader")
+        .body("MikuMikuLoader running at http://0.0.0.0:3939")
+        .show()
+    {
+        Ok(_) => {}
+        Err(e) => {
+            error!("Could not show desktop notification: {e}")
+        }
+    }
+
+    #[cfg(not(debug_assertions))]
+    // Don't open browser in debug mode, because that would be really annoying.
+    match webbrowser::open("http://127.0.0.1:3939") {
+        Ok(_) => {}
+        Err(e) => {
+            let message = format!(
+                "Could not open default browser: {e} Please visit http://127.0.0.1:3939 to use MikuMikuLoader."
+            );
+            error!("{message}");
+            match Notification::new()
+                .summary("MikuMikuLoader")
+                .body(&message)
+                .show()
+            {
+                Ok(_) => {}
+                Err(e) => {
+                    error!("Could not show desktop notification: {e}")
+                }
+            }
+        }
+    }
+
     if sekai_injector_enabled {
         let backend_task = task::spawn(sekai_injector_serve(Arc::clone(&manager)));
         match tokio::join!(backend_task, webui_server).0 {
@@ -210,7 +243,7 @@ async fn main() {
                 Notification::new()
                     .summary("MikuMikuLoader")
                     .body(&format!(
-                        "Could not start MikuMikuLoader: {e}\n\nCheck the log for more information!"
+                        "You might need to run as root/admin.\nCould not start MikuMikuLoader: {e}\n\nCheck the log for more information!"
                     ))
                     .timeout(0)
                     .show()
