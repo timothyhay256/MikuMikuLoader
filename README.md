@@ -1,6 +1,8 @@
 # MikuMikuLoader
 ## A network-based modding platform for Project Sekai
 
+`This project is not affiliated with or endorsed by Sega, Colorful Palette, Craft Egg, Crypton Future Media, or Project Sekai. It does not modify the game client, and does not distribute or contain any proprietary game assets. All reverse engineering was performed for interoperability and educational purposes under fair use principles.`
+
 #### This is currently unfinished, and not usable! 
 
 ## Roadmap
