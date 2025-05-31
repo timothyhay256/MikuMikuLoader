@@ -45,10 +45,21 @@ async fn main() {
 
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
+    let mut ansi_enabled = true;
+
+    #[cfg(windows)] // Allow Windows users to view colored output
+    match ansi_term::enable_ansi_support() {
+        Ok(_) => {}
+        Err(e) => {
+            error!("Failed to enable ansi support for Windows cmd, disabling colors.");
+            ansi_enabled = false;
+        }
+    }
+
     // Layer for stdout with ANSI colors
     let stdout_layer = fmt::layer()
         .with_writer(std::io::stdout) // or std::io::stderr if preferred
-        .with_ansi(true)
+        .with_ansi(ansi_enabled)
         .with_filter(if opts.verbose {
             EnvFilter::new("debug,dbus=warn,zbus=warn,tracing=warn")
         } else {
