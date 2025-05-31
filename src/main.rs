@@ -8,6 +8,8 @@ use std::{fs::File, net::SocketAddr, panic, path::Path, sync::Arc};
 use axum::{
     Router,
     body::Body,
+    http::{StatusCode, header},
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use colored::Colorize;
@@ -16,6 +18,8 @@ use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use log::{error, info, warn};
 use notify_rust::Notification;
+use routes::static_handler;
+use rust_embed::Embed;
 use sekai_injector::{Manager, ServerStatistics, load_injection_map, serve};
 use std::io::Read;
 use tokio::{sync::RwLock, task};
@@ -148,6 +152,7 @@ async fn main() {
 
             warn!("{message}");
             Notification::new()
+                .appname("MikuMikuLoader")
                 .summary("MikuMikuLoader")
                 .body(&message)
                 .show()
@@ -182,14 +187,11 @@ async fn main() {
     }));
 
     let static_routes = Router::new()
-        .route_service("/", ServeFile::new("static/index.html"))
-        .route_service(
-            "/server-status",
-            ServeFile::new("static/server-status.html"),
-        )
-        .route_service("/custom-story", ServeFile::new("static/custom-story.html"))
-        .route_service("/cert-gen", ServeFile::new("static/certificate-gen.html"))
-        .fallback_service(ServeDir::new("static"));
+        .route_service("/", get(routes::index_handler))
+        .route_service("/server-status", get(routes::server_status_handler))
+        .route_service("/custom-story", get(routes::custom_story_handler))
+        .route_service("/cert-gen", get(routes::cert_gen_handler))
+        .route("/{*file}", get(static_handler));
 
     let api_routes = Router::new()
         .route("/total-passthrough", get(routes::total_passthrough))
@@ -214,6 +216,7 @@ async fn main() {
     info!("MikuMikuLoader running at http://0.0.0.0:3939");
 
     match Notification::new()
+        .appname("MikuMikuLoader")
         .summary("MikuMikuLoader")
         .body("MikuMikuLoader running at http://0.0.0.0:3939")
         .show()
@@ -234,6 +237,7 @@ async fn main() {
             );
             error!("{message}");
             match Notification::new()
+                .appname("MikuMikuLoader")
                 .summary("MikuMikuLoader")
                 .body(&message)
                 .show()
@@ -252,6 +256,7 @@ async fn main() {
             Ok(_) => {}
             Err(e) => {
                 Notification::new()
+                    .appname("MikuMikuLoader")
                     .summary("MikuMikuLoader")
                     .body(&format!(
                         "You might need to run as root/admin.\nCould not start MikuMikuLoader: {e}\n\nCheck the log for more information!"
@@ -270,4 +275,27 @@ async fn sekai_injector_serve(manager: Arc<RwLock<Manager>>) {
     info!("Starting sekai-injector server!");
 
     serve(manager).await;
+}
+
+#[derive(Embed)]
+#[folder = "static/"]
+struct Asset;
+
+pub struct StaticFile<T>(pub T);
+
+impl<T> IntoResponse for StaticFile<T>
+where
+    T: Into<String>,
+{
+    fn into_response(self) -> Response {
+        let path = self.0.into();
+
+        match Asset::get(path.as_str()) {
+            Some(content) => {
+                let mime = mime_guess::from_path(path).first_or_octet_stream();
+                ([(header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
+            }
+            None => (StatusCode::NOT_FOUND, "404 Not Found").into_response(),
+        }
+    }
 }

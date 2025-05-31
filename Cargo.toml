@@ -24,6 +24,9 @@ tracing-subscriber = "0.3.19"
 tracing-appender = "0.2.3"
 webbrowser = "1.0.4"
 ansi_term = "0.12.1"
+include_dir = "0.7.4"
+rust-embed = "8.7.2"
+mime_guess = "2.0.5"
 
 [lints.rust]
 unsafe_code = "forbid"

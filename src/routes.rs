@@ -3,6 +3,7 @@ use std::{env, path::Path as fPath, sync::Arc};
 use axum::{
     Json,
     extract::{Path, State},
+    http::Uri,
     response::IntoResponse,
 };
 use local_ip_address::local_ip;
@@ -13,7 +14,7 @@ use sekai_injector::{
 use serde::Deserialize;
 use tokio::sync::RwLock;
 
-use crate::{mods::ModData, scenario::SekaiStoriesScene};
+use crate::{StaticFile, mods::ModData, scenario::SekaiStoriesScene};
 
 #[derive(Debug, Deserialize)]
 pub struct CertGenOptions {
@@ -167,4 +168,26 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
     //     mod_ty
     // }
     Json("Success")
+}
+
+pub async fn index_handler() -> impl IntoResponse {
+    static_handler("/index.html".parse::<Uri>().unwrap()).await
+}
+
+pub async fn custom_story_handler() -> impl IntoResponse {
+    static_handler("/custom-story.html".parse::<Uri>().unwrap()).await
+}
+
+pub async fn cert_gen_handler() -> impl IntoResponse {
+    static_handler("/certificate-gen.html".parse::<Uri>().unwrap()).await
+}
+
+pub async fn server_status_handler() -> impl IntoResponse {
+    static_handler("/server-status.html".parse::<Uri>().unwrap()).await
+}
+
+pub async fn static_handler(uri: Uri) -> impl IntoResponse {
+    let mut path = uri.path().trim_start_matches('/').to_string();
+
+    StaticFile(path)
 }
