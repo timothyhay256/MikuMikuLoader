@@ -3,7 +3,7 @@ mod routes;
 mod scenario;
 mod utils;
 
-use std::{fs::File, net::SocketAddr, path::Path, sync::Arc};
+use std::{fs::File, net::SocketAddr, panic, path::Path, sync::Arc};
 
 use axum::{
     Router,
@@ -14,14 +14,14 @@ use colored::Colorize;
 use gumdrop::Options;
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
-use log::{info, warn};
+use log::{error, info, warn};
 use notify_rust::Notification;
 use sekai_injector::{Manager, ServerStatistics, load_injection_map, serve};
 use std::io::Read;
 use tokio::{sync::RwLock, task};
 use tower_http::services::{ServeDir, ServeFile};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Debug, Options)]
 struct CommandOptions {
@@ -45,14 +45,44 @@ async fn main() {
 
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
-    tracing_subscriber::fmt()
-        .with_env_filter(if opts.verbose {
-            EnvFilter::new("debug,dbus=warn,zbus=warn,tracing=warn") // notify_rust is very verbose otherwise
+    // Layer for stdout with ANSI colors
+    let stdout_layer = fmt::layer()
+        .with_writer(std::io::stdout) // or std::io::stderr if preferred
+        .with_ansi(true)
+        .with_filter(if opts.verbose {
+            EnvFilter::new("debug,dbus=warn,zbus=warn,tracing=warn")
         } else {
             EnvFilter::new("info,dbus=warn,zbus=warn,tracing=warn")
-        })
+        });
+
+    // Layer for non_blocking writer without ANSI
+    let non_blocking_layer = fmt::layer()
         .with_writer(non_blocking)
+        .with_ansi(false)
+        .with_filter(if opts.verbose {
+            EnvFilter::new("debug,dbus=warn,zbus=warn,tracing=warn")
+        } else {
+            EnvFilter::new("info,dbus=warn,zbus=warn,tracing=warn")
+        });
+
+    tracing_subscriber::registry()
+        .with(stdout_layer)
+        .with(non_blocking_layer)
         .init();
+
+    panic::set_hook(Box::new(|panic_info| {
+        // Hook panics so those running outside a terminal window can still see errors in the logs
+        if let Some(location) = panic_info.location() {
+            error!(
+                "Panic occurred in file '{}' at line {}: {}",
+                location.file(),
+                location.line(),
+                panic_info
+            );
+        } else {
+            error!("Panic occurred: {panic_info}");
+        }
+    }));
 
     info!("{}", "ハローセカイ!".green());
 
@@ -62,28 +92,37 @@ async fn main() {
     };
 
     let mut config_file_contents = String::new();
-    let mut config_file =
-        File::open(config_path).expect("Could not open MikuMiku.toml. Do I have permission?");
-    config_file
-        .read_to_string(&mut config_file_contents)
-        .expect(
-            "The config file contains non UTF-8 characters, what in the world did you put in it??",
-        );
-    let config_holder: utils::Config = toml::from_str(&config_file_contents)
-        .expect("The config file was not formatted properly and could not be read.");
+
+    let config_holder: utils::Config = match File::open(config_path) {
+        Ok(mut file) => {
+            file.read_to_string(&mut config_file_contents).expect("The config file contains non UTF-8 characters, what in the world did you put in it??");
+            toml::from_str(&config_file_contents)
+                .expect("The config file was not formatted properly and could not be read.")
+        }
+        Err(_) => {
+            warn!("No MikuMikuLoader config found, using defaults!");
+            utils::Config::default()
+        }
+    };
 
     let injector_config_path = Path::new(&config_holder.advanced.sekai_injector_config_path);
 
     let mut injector_file_contents = String::new();
-    let mut injector_config_file = File::open(injector_config_path)
-        .expect("Could not open config file. Do I have permission?");
-    injector_config_file
-        .read_to_string(&mut injector_file_contents)
+
+    let injector_config_holder: sekai_injector::Config = match File::open(injector_config_path) {
+        Ok(mut file) => {
+            file.read_to_string(&mut injector_file_contents)
         .expect(
             "The config file contains non UTF-8 characters, what in the world did you put in it??",
         );
-    let injector_config_holder: sekai_injector::Config = toml::from_str(&injector_file_contents)
-        .expect("The config file was not formatted properly and could not be read.");
+            toml::from_str(&injector_file_contents)
+                .expect("The config file was not formatted properly and could not be read.")
+        }
+        Err(_) => {
+            warn!("No sekai injector config found, using defaults!");
+            sekai_injector::Config::default()
+        }
+    };
 
     let mut sekai_injector_enabled = true;
 
@@ -165,7 +204,19 @@ async fn main() {
 
     if sekai_injector_enabled {
         let backend_task = task::spawn(sekai_injector_serve(Arc::clone(&manager)));
-        tokio::join!(backend_task, webui_server).0.unwrap();
+        match tokio::join!(backend_task, webui_server).0 {
+            Ok(_) => {}
+            Err(e) => {
+                Notification::new()
+                    .summary("MikuMikuLoader")
+                    .body(&format!(
+                        "Could not start MikuMikuLoader: {e}\n\nCheck the log for more information!"
+                    ))
+                    .timeout(0)
+                    .show()
+                    .unwrap();
+            }
+        };
     } else {
         tokio::join!(webui_server).0.unwrap();
     }
