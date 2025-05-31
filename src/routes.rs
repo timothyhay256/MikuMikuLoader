@@ -13,6 +13,8 @@ use sekai_injector::{
 use serde::Deserialize;
 use tokio::sync::RwLock;
 
+use crate::{mods::ModData, scenario::SekaiStoriesScene};
+
 #[derive(Debug, Deserialize)]
 pub struct CertGenOptions {
     pub hostname: String,
@@ -30,6 +32,18 @@ pub struct CAGenOptions {
     pub ca_lifetime: i64,
     pub ca_file_name: String,
     pub ca_key_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CustomStory {
+    pub file_name: String,
+    pub data: Vec<CustomStoryScene>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CustomStoryScene {
+    pub index: i64,
+    pub data: SekaiStoriesScene,
 }
 
 // TODO: Use SSE and channels
@@ -73,16 +87,12 @@ pub async fn return_version() -> impl IntoResponse {
 }
 
 pub async fn gen_cert(Json(payload): Json<CertGenOptions>) -> impl IntoResponse {
-    debug!(
-        "Received cert generation request at gen_cert endpoint: {:?}",
-        payload
-    );
+    debug!("Received cert generation request at gen_cert endpoint: {payload:?}");
 
     for path in [&payload.ca_name_input, &payload.ca_key_input].iter() {
         if !fPath::new(*path).exists() {
             return Json(format!(
-                "{} does not exist! You need to generate the CA first.",
-                path
+                "{path} does not exist! You need to generate the CA first."
             ));
         }
     }
@@ -90,8 +100,7 @@ pub async fn gen_cert(Json(payload): Json<CertGenOptions>) -> impl IntoResponse 
     for path in [&payload.cert_name, &payload.cert_key_name].iter() {
         if fPath::new(*path).exists() {
             return Json(format!(
-                "{} already exists! To overwrite it, please delete it first.",
-                path
+                "{path} already exists! To overwrite it, please delete it first."
             ));
         }
     }
@@ -121,16 +130,12 @@ pub async fn gen_cert(Json(payload): Json<CertGenOptions>) -> impl IntoResponse 
 }
 
 pub async fn gen_ca(Json(payload): Json<CAGenOptions>) -> impl IntoResponse {
-    debug!(
-        "Received CA generation request at gen_ca endpoint: {:?}",
-        payload
-    );
+    debug!("Received CA generation request at gen_ca endpoint: {payload:?}");
 
     for path in [&payload.ca_file_name, &payload.ca_key_name].iter() {
         if fPath::new(*path).exists() {
             return Json(format!(
-                "{} already exists! To overwrite it, please delete it first. Please note that if you do so, the program will break until you regenerate the certificates and reinstall the new CA on your device.",
-                path
+                "{path} already exists! To overwrite it, please delete it first. Please note that if you do so, the program will break until you regenerate the certificates and reinstall the new CA on your device."
             ));
         }
     }
@@ -153,4 +158,13 @@ pub async fn gen_ca(Json(payload): Json<CAGenOptions>) -> impl IntoResponse {
         "CA succesfully generated! It was placed in {}",
         env::current_dir().unwrap().display()
     ))
+}
+
+pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl IntoResponse {
+    info!("Received story export to modpack request at export_story endpoint: {payload:?}");
+
+    // let modpack = ModData {
+    //     mod_ty
+    // }
+    Json("Success")
 }
