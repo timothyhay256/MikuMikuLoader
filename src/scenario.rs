@@ -4,23 +4,23 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 pub struct ScenarioAdapter {
-    name: String,
-    scenario_id: String,
-    first_bgm: String,
-    mv_id: String,
+    pub name: String,
+    pub scenario_id: String,
+    pub first_bgm: String,
+    pub mv_id: String,
 
-    first_background: String,
-    first_character_layout_mode: i32,
+    pub first_background: String,
+    pub first_character_layout_mode: i32,
 
-    speed: f32,
-    font_size: f32,
+    pub speed: f32,
+    pub font_size: f32,
 
-    when_finish_close_window: bool,
-    require_play_effect: bool,
+    pub when_finish_close_window: bool,
+    pub require_play_effect: bool,
 
-    appear_characters: Vec<ScenarioAdapterAppearCharacters>,
-    talk_data: Vec<ScenarioAdapterTalkData>,
-    character_layout: Vec<ScenarioAdapterCharacterLayout>,
+    pub appear_characters: Vec<ScenarioAdapterAppearCharacters>,
+    pub talk_data: Vec<ScenarioAdapterTalkData>,
+    pub character_layout: Vec<ScenarioAdapterCharacterLayout>,
 }
 
 impl Default for ScenarioAdapter {
@@ -46,24 +46,24 @@ impl Default for ScenarioAdapter {
 #[derive(Debug, Deserialize)]
 pub struct ScenarioAdapterAppearCharacters {
     // SEKAI Stories needs to fill this, no default is provided
-    character_2d_id: i32,
-    character_costume: String,
+    pub character_2d_id: i32,
+    pub character_costume: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct ScenarioAdapterTalkData {
-    character_2d_id: i32,
-    display_name: String,
-    text: String,
-    talk_tention: i32,
-    lib_sync: i32,
+    pub character_2d_id: i32,
+    pub display_name: String,
+    pub text: String,
+    pub talk_tention: i32,
+    pub lib_sync: i32,
 
-    motion: Vec<ScenarioAdapterTalkDataMotion>,
-    voice: Vec<ScenarioAdapterTalkDataVoices>,
-    special_effects: Vec<ScenarioAdapterSpecialEffect>,
-    sound: Vec<ScenarioAdapterSoundData>,
+    pub motion: Vec<ScenarioAdapterTalkDataMotion>,
+    pub voice: Vec<ScenarioAdapterTalkDataVoices>,
+    pub special_effects: Vec<ScenarioAdapterSpecialEffect>,
+    pub sound: Vec<ScenarioAdapterSoundData>,
 
-    needed_bundles: ScenarioAdapterNeededBundles,
+    pub needed_bundles: ScenarioAdapterNeededBundles,
 }
 
 impl Default for ScenarioAdapterTalkData {
@@ -85,8 +85,8 @@ impl Default for ScenarioAdapterTalkData {
 
 #[derive(Debug, Deserialize)]
 pub struct ScenarioAdapterTalkDataMotion {
-    motion_name: String,
-    facial_name: String,
+    pub motion_name: String,
+    pub facial_name: String,
 }
 
 impl Default for ScenarioAdapterTalkDataMotion {
@@ -100,8 +100,8 @@ impl Default for ScenarioAdapterTalkDataMotion {
 
 #[derive(Debug, Deserialize)]
 pub struct ScenarioAdapterTalkDataVoices {
-    voice_id: String,
-    volume: f32,
+    pub voice_id: String,
+    pub volume: f32,
 }
 
 impl Default for ScenarioAdapterTalkDataVoices {
@@ -115,47 +115,47 @@ impl Default for ScenarioAdapterTalkDataVoices {
 
 #[derive(Debug, Deserialize)]
 pub struct ScenarioAdapterCharacterLayout {
-    character_2d_id: i32,
-    layout_type: i32,
-    depth_type: i32,
-    move_speed_type: i32,
+    pub character_2d_id: i32,
+    pub layout_type: i32,
+    pub depth_type: i32,
+    pub move_speed_type: i32,
 
-    side_from: i32,
-    side_from_offset_x: f32,
-    side_to: i32,
-    side_to_offset_x: f32,
+    pub side_from: i32,
+    pub side_from_offset_x: f32,
+    pub side_to: i32,
+    pub side_to_offset_x: f32,
 
-    costume_type: String,
+    pub costume_type: String,
 
-    motion: ScenarioAdapterTalkDataMotion,
+    pub motion: ScenarioAdapterTalkDataMotion,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct ScenarioAdapterSpecialEffect {
-    effect_type: i32,
-    duration: f32,
-    int_val: i32,
+    pub effect_type: i32,
+    pub duration: f32,
+    pub int_val: i32,
 
-    string: String,
-    string_sub: String,
+    pub string: String,
+    pub string_sub: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct ScenarioAdapterSoundData {
-    play_mode: i32,
+    pub play_mode: i32,
 
-    bgm_string: String,
-    se_string: String,
-    se_bundle_name: String,
+    pub bgm_string: String,
+    pub se_string: String,
+    pub se_bundle_name: String,
 
-    volume: f32,
-    duration: f32,
+    pub volume: f32,
+    pub duration: f32,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct ScenarioAdapterNeededBundles {
-    bundle_names: Vec<String>,
-    sound_bundle_names: Vec<String>,
+    pub bundle_names: Vec<String>,
+    pub sound_bundle_names: Vec<String>,
 }
 
 impl Default for ScenarioAdapterNeededBundles {
@@ -169,40 +169,52 @@ impl Default for ScenarioAdapterNeededBundles {
 
 #[derive(Debug, Deserialize)]
 pub struct ScenarioAdapterCharacterLayoutMode {
-    layouts: Vec<i32>,
+    pub layouts: Vec<i32>,
 }
 
-#[allow(non_snake_case)] // Sekai Stories uses snake case.
 #[derive(Debug, Deserialize)]
+pub struct CustomStory {
+    pub file_name: String,
+    pub data: Vec<CustomStoryScene>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CustomStoryScene {
+    pub index: i64,
+    pub data: SekaiStoriesScene,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SekaiStoriesScene {
-    lastModified: String,
-    background: String,
-    text: SekaiStoriesSceneText,
-    models: Vec<SekaiStoriesSceneModels>,
+    pub last_modified: String,
+    pub background: String,
+    pub text: SekaiStoriesSceneText,
+    pub models: Vec<SekaiStoriesSceneModels>,
 }
 
-#[allow(non_snake_case)]
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SekaiStoriesSceneText {
-    nameTag: String,
-    dialogue: String,
+    pub name_tag: String,
+    pub dialogue: String,
 }
 
-#[allow(non_snake_case)]
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SekaiStoriesSceneModels {
-    from: String,
-    character: String,
-    modelName: String,
-    modelTransform: SekaiStoriesSceneTransform,
-    modelExpression: i32,
-    modelPose: i32,
+    pub from: String,
+    pub character: String,
+    pub modelName: String,
+    pub modelTransform: SekaiStoriesSceneTransform,
+    pub modelExpression: i32,
+    pub modelPose: i32,
 }
 
-#[allow(non_snake_case)]
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SekaiStoriesSceneTransform {
-    x: i32,
-    y: i32,
-    scale: f32,
+    pub x: i32,
+    pub y: i32,
+    pub scale: f32,
 }

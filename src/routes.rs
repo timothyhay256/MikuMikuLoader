@@ -1,4 +1,4 @@
-use std::{env, path::Path as fPath, sync::Arc};
+use std::{collections::HashMap, default, env, fs, path::Path as fPath, sync::Arc};
 
 use axum::{
     Json,
@@ -7,14 +7,19 @@ use axum::{
     response::IntoResponse,
 };
 use local_ip_address::local_ip;
-use log::{debug, info};
+use log::{debug, error, info};
 use sekai_injector::{
     CertificateGenParams, Manager, RequestParams, generate_ca, new_self_signed_cert,
 };
 use serde::Deserialize;
 use tokio::sync::RwLock;
 
-use crate::{StaticFile, mods::ModData, scenario::SekaiStoriesScene};
+use crate::{
+    StaticFile,
+    mods::{ModData, ModType},
+    notify_mml,
+    scenario::{CustomStory, ScenarioAdapter, ScenarioAdapterTalkData, SekaiStoriesScene},
+};
 
 #[derive(Debug, Deserialize)]
 pub struct CertGenOptions {
@@ -36,15 +41,15 @@ pub struct CAGenOptions {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct CustomStory {
-    pub file_name: String,
-    pub data: Vec<CustomStoryScene>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CustomStoryScene {
-    pub index: i64,
-    pub data: SekaiStoriesScene,
+#[serde(rename_all = "camelCase")]
+pub struct Character2DS {
+    id: i32,
+    character_type: String,
+    is_next_grade: bool,
+    character_id: i32,
+    unit: String,
+    is_enabled_flip_display: bool,
+    asset_name: Option<String>,
 }
 
 // TODO: Use SSE and channels
@@ -164,9 +169,78 @@ pub async fn gen_ca(Json(payload): Json<CAGenOptions>) -> impl IntoResponse {
 pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl IntoResponse {
     info!("Received story export to modpack request at export_story endpoint: {payload:?}");
 
-    // let modpack = ModData {
-    //     mod_ty
-    // }
+    // Load character2ds
+    let character2ds_file = fs::File::open("assets/character2ds.json").expect("Could not read assets/character2ds.json! Please remove the assets folder and try again to redownload assets.");
+
+    let character2ds: Vec<Character2DS> = serde_json::from_reader(character2ds_file).expect(
+        "character2ds.json is not formatted properly! Check if MikuMikuLoader is out of date.",
+    );
+
+    let character2ds_map: HashMap<String, Character2DS> = character2ds
+        .into_iter()
+        .filter_map(|c| c.asset_name.clone().map(|name| (name, c)))
+        .collect();
+
+    let mut modpack = ModData {
+        mod_type: crate::mods::ModType::Story(ScenarioAdapter::default()),
+    };
+
+    // We don't use an implementation because the CustomStory type is likely to change often, so we just do it all here
+    let ModType::Story(adapter) = &mut modpack.mod_type;
+
+    // Push the first background
+    adapter.first_background = fPath::new(&payload.data[0].data.background.clone().to_string())
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_owned();
+
+    // Loop through all the scenes to push the relevant data
+    for scene in payload.data {
+        // Populate appear_characters, and use the grabbed id to populate talk_data at the same time
+        for model in scene.data.models {
+            if model.from == "sekai" {
+                // Removes costume name from character name
+                let asset_prefix = match model.modelName.rfind('_') {
+                    Some(idx) => &model.modelName[..idx],
+                    None => &model.modelName,
+                };
+
+                let character_id = {
+                    match character2ds_map.get(asset_prefix) {
+                        Some(item) => item.character_id,
+                        None => {
+                            error!(
+                                "Could not find a matching Character2DId for {}, using Miku!",
+                                model.character
+                            );
+                            21
+                        }
+                    }
+                };
+
+                adapter // Push character to appear_characters
+                    .appear_characters
+                    .push(crate::scenario::ScenarioAdapterAppearCharacters {
+                        character_2d_id: { character_id },
+                        character_costume: model.modelName,
+                    });
+
+                adapter.talk_data.push(ScenarioAdapterTalkData {
+                    // Push character to talk_data (which will have other fields filled later)
+                    character_2d_id: character_id,
+                    display_name: model.character.to_uppercase(),
+                    ..Default::default()
+                })
+            } else {
+                error!("Only characters from Project Sekai are currently supported!");
+                notify_mml(
+                    "Found a non-Sekai character in cust story. Only characters from Project Sekai are currently supported!",
+                );
+            }
+        }
+    }
+
     Json("Success")
 }
 
@@ -187,7 +261,7 @@ pub async fn server_status_handler() -> impl IntoResponse {
 }
 
 pub async fn static_handler(uri: Uri) -> impl IntoResponse {
-    let mut path = uri.path().trim_start_matches('/').to_string();
+    let path = uri.path().trim_start_matches('/').to_string();
 
     StaticFile(path)
 }

@@ -3,7 +3,15 @@ mod routes;
 mod scenario;
 mod utils;
 
-use std::{fs::File, net::SocketAddr, panic, path::Path, sync::Arc};
+use std::{
+    error::Error,
+    fs::{File, create_dir_all},
+    io::Cursor,
+    net::SocketAddr,
+    panic,
+    path::Path,
+    sync::Arc,
+};
 
 use axum::{
     Router,
@@ -12,20 +20,23 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+
 use colored::Colorize;
 use gumdrop::Options;
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use notify_rust::Notification;
 use routes::static_handler;
 use rust_embed::Embed;
 use sekai_injector::{Manager, ServerStatistics, load_injection_map, serve};
 use std::io::Read;
+use std::io::Write;
 use tokio::{sync::RwLock, task};
 use tower_http::services::{ServeDir, ServeFile};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use utils::AssetConfig;
 
 #[derive(Debug, Options)]
 struct CommandOptions {
@@ -151,12 +162,7 @@ async fn main() {
             );
 
             warn!("{message}");
-            Notification::new()
-                .appname("MikuMikuLoader")
-                .summary("MikuMikuLoader")
-                .body(&message)
-                .show()
-                .unwrap();
+            notify_mml(&message);
 
             sekai_injector_enabled = false;
         }
@@ -213,19 +219,12 @@ async fn main() {
     let webui_addr = SocketAddr::from(([0, 0, 0, 0], 3939));
     let webui_server = axum_server::bind(webui_addr).serve(webui_app.into_make_service());
 
-    info!("MikuMikuLoader running at http://0.0.0.0:3939");
+    notify_mml("MikuMikuLoader running at http://0.0.0.0:3939");
 
-    match Notification::new()
-        .appname("MikuMikuLoader")
-        .summary("MikuMikuLoader")
-        .body("MikuMikuLoader running at http://0.0.0.0:3939")
-        .show()
-    {
+    match update_assets(config_holder.advanced.assets).await {
         Ok(_) => {}
-        Err(e) => {
-            error!("Could not show desktop notification: {e}")
-        }
-    }
+        Err(e) => error!("Could not update assets: {e}\n"),
+    };
 
     #[cfg(not(debug_assertions))]
     // Don't open browser in debug mode, because that would be really annoying.
@@ -236,17 +235,7 @@ async fn main() {
                 "Could not open default browser: {e} Please visit http://127.0.0.1:3939 to use MikuMikuLoader."
             );
             error!("{message}");
-            match Notification::new()
-                .appname("MikuMikuLoader")
-                .summary("MikuMikuLoader")
-                .body(&message)
-                .show()
-            {
-                Ok(_) => {}
-                Err(e) => {
-                    error!("Could not show desktop notification: {e}")
-                }
-            }
+            notify_mml(&message);
         }
     }
 
@@ -255,15 +244,9 @@ async fn main() {
         match tokio::join!(backend_task, webui_server).0 {
             Ok(_) => {}
             Err(e) => {
-                Notification::new()
-                    .appname("MikuMikuLoader")
-                    .summary("MikuMikuLoader")
-                    .body(&format!(
-                        "You might need to run as root/admin.\nCould not start MikuMikuLoader: {e}\n\nCheck the log for more information!"
-                    ))
-                    .timeout(0)
-                    .show()
-                    .unwrap();
+                notify_mml(&format!(
+                    "You might need to run as root/admin.\nCould not start MikuMikuLoader: {e}\n\nCheck the log for more information!"
+                ));
             }
         };
     } else {
@@ -275,6 +258,127 @@ async fn sekai_injector_serve(manager: Arc<RwLock<Manager>>) {
     info!("Starting sekai-injector server!");
 
     serve(manager).await;
+}
+
+pub fn notify_mml(body: &str) {
+    info!("{body}");
+
+    if let Err(e) = Notification::new()
+        .appname("MikuMikuLoader")
+        .summary("MikuMikuLoader")
+        .body(body)
+        .show()
+    {
+        error!("Could not show desktop notification: {e}");
+    }
+}
+
+pub async fn update_assets(asset_config: AssetConfig) -> Result<(), Box<dyn Error>> {
+    notify_mml("Checking assets for updates...");
+
+    let client = reqwest::Client::new();
+
+    for (list, url) in [
+        asset_config.needed_asset_files,
+        asset_config.needed_template_files,
+    ]
+    .iter()
+    .zip([
+        asset_config.common_asset_url,
+        asset_config.template_asset_url,
+    ]) {
+        for asset in list {
+            let mut skip_download = false;
+
+            let url = format!("https://{url}/{asset}");
+
+            info!("Updating {url}");
+
+            let resp = client // Just grabs HEAD
+                .head(&url)
+                .send()
+                .await
+                .unwrap();
+
+            let mut new_etag_val: Option<&str> = None;
+
+            if let Some(etag) = resp.headers().get("ETag") {
+                debug!("{} ETag: {}", asset, etag.to_str()?);
+                new_etag_val = Some(etag.to_str()?);
+            } else {
+                warn!("Upstream server doesn't support etag, redownloading assets!");
+            }
+
+            let existing_etag_path = format!("assets/{asset}.etag");
+            let existing_etag_path = Path::new(&existing_etag_path);
+            let mut etag_needs_update = true;
+
+            if existing_etag_path.exists() {
+                let existing_etag_val = {
+                    let mut contents = String::new();
+
+                    File::open(existing_etag_path)
+                        .expect("Cannot read {}, despite knowing it exists.")
+                        .read_to_string(&mut contents)
+                        .unwrap();
+
+                    contents
+                };
+
+                if existing_etag_val == new_etag_val.unwrap_or("") {
+                    // If it's a None, then just make sure this will eval false.
+                    info!("{} is still up to date.", existing_etag_path.display());
+                    skip_download = true;
+                    etag_needs_update = false;
+                }
+            }
+
+            if etag_needs_update {
+                // Update etag
+                debug!("Storing etag for {asset}");
+
+                match File::create(format!("assets/{asset}.etag")) {
+                    Ok(mut etag_file) => match write!(etag_file, "{}", new_etag_val.unwrap()) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!(
+                                "Failed to write assets/{asset}.etag! Asset will always be redownloaded. Err: {e}"
+                            )
+                        }
+                    },
+                    Err(e) => error!(
+                        "Failed to write assets/{asset}.etag! Asset will always be redownloaded. Err: {e}"
+                    ),
+                }
+            }
+
+            if !skip_download {
+                info!("Downloading {asset}");
+                let resp = client.get(url).send().await.unwrap();
+
+                // If the asset has parent directory(s), create them
+                let asset_dir = match asset.rfind('/') {
+                    Some(idx) => &asset[..idx],
+                    None => "",
+                };
+
+                match create_dir_all(format!("assets/{asset_dir}")) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        error!(
+                            "Cannot create assets/{asset_dir}: {e}. Trying to download anyway..."
+                        )
+                    }
+                }
+
+                let mut file = std::fs::File::create(format!("assets/{asset}"))?;
+                let mut content = Cursor::new(resp.bytes().await?);
+                std::io::copy(&mut content, &mut file)?;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Embed)]

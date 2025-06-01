@@ -1,2 +1,11 @@
+# Do not edit this unless you know what you are doing!
+
 [advanced]
 sekai_injector_config_path = "sekai-injector.toml"
+
+[advanced.assets]
+asset_path = "assets"
+common_asset_url = "raw.githubusercontent.com/Sekai-World/sekai-master-db-diff/refs/heads/main"
+template_asset_url = "raw.githubusercontent.com/timothyhay256/MML-templates/refs/heads/main"
+needed_asset_files = ["character2ds.json"]
+needed_template_files = ["story/scenario/template.yaml"]

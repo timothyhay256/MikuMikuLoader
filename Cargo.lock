@@ -17,6 +17,8 @@ dependencies = [
  "log",
  "mime_guess",
  "notify-rust",
+ "regex",
+ "reqwest",
  "rust-embed",
  "sekai_injector",
  "serde",
