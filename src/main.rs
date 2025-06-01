@@ -10,6 +10,7 @@ use std::{
     net::SocketAddr,
     panic,
     path::Path,
+    pin::Pin,
     sync::Arc,
 };
 
@@ -22,6 +23,8 @@ use axum::{
 };
 
 use colored::Colorize;
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use gumdrop::Options;
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
@@ -33,7 +36,6 @@ use sekai_injector::{Manager, ServerStatistics, load_injection_map, serve};
 use std::io::Read;
 use std::io::Write;
 use tokio::{sync::RwLock, task};
-use tower_http::services::{ServeDir, ServeFile};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use utils::AssetConfig;
@@ -277,20 +279,27 @@ pub async fn update_assets(asset_config: AssetConfig) -> Result<(), Box<dyn Erro
     notify_mml("Checking assets for updates...");
 
     let client = reqwest::Client::new();
+    let mut tasks = FuturesUnordered::<Pin<Box<dyn Future<Output = String>>>>::new();
 
-    for (list, url) in [
+    for (list, base_url) in [
         asset_config.needed_asset_files,
         asset_config.needed_template_files,
+        asset_config.needed_live2d_files,
     ]
     .iter()
     .zip([
         asset_config.common_asset_url,
         asset_config.template_asset_url,
+        asset_config.live2d_asset_url,
     ]) {
-        for asset in list {
-            let mut skip_download = false;
+        let list = list.clone();
 
-            let url = format!("https://{url}/{asset}");
+        for asset in list {
+            let client = client.clone();
+            let url = format!("https://{}/{asset}", &base_url.clone());
+
+            tasks.push(Box::pin(async move {
+                let mut skip_download = false;
 
             info!("Updating {url}");
 
@@ -303,8 +312,8 @@ pub async fn update_assets(asset_config: AssetConfig) -> Result<(), Box<dyn Erro
             let mut new_etag_val: Option<&str> = None;
 
             if let Some(etag) = resp.headers().get("ETag") {
-                debug!("{} ETag: {}", asset, etag.to_str()?);
-                new_etag_val = Some(etag.to_str()?);
+                debug!("{} ETag: {}", asset, etag.to_str().unwrap());
+                new_etag_val = Some(etag.to_str().unwrap());
             } else {
                 warn!("Upstream server doesn't support etag, redownloading assets!");
             }
@@ -333,25 +342,6 @@ pub async fn update_assets(asset_config: AssetConfig) -> Result<(), Box<dyn Erro
                 }
             }
 
-            if etag_needs_update {
-                // Update etag
-                debug!("Storing etag for {asset}");
-
-                match File::create(format!("assets/{asset}.etag")) {
-                    Ok(mut etag_file) => match write!(etag_file, "{}", new_etag_val.unwrap()) {
-                        Ok(_) => {}
-                        Err(e) => {
-                            error!(
-                                "Failed to write assets/{asset}.etag! Asset will always be redownloaded. Err: {e}"
-                            )
-                        }
-                    },
-                    Err(e) => error!(
-                        "Failed to write assets/{asset}.etag! Asset will always be redownloaded. Err: {e}"
-                    ),
-                }
-            }
-
             if !skip_download {
                 info!("Downloading {asset}");
                 let resp = client.get(url).send().await.unwrap();
@@ -371,12 +361,41 @@ pub async fn update_assets(asset_config: AssetConfig) -> Result<(), Box<dyn Erro
                     }
                 }
 
-                let mut file = std::fs::File::create(format!("assets/{asset}"))?;
-                let mut content = Cursor::new(resp.bytes().await?);
-                std::io::copy(&mut content, &mut file)?;
+                let mut file = std::fs::File::create(format!("assets/{asset}")).expect("Failed to write asset to file");
+                let mut content = Cursor::new(resp.bytes().await.unwrap());
+                std::io::copy(&mut content, &mut file).expect("Failed to write asset to file");
             }
+
+            if etag_needs_update {
+                // Update etag
+                debug!("Storing etag for {asset}");
+
+                match File::create(format!("assets/{asset}.etag")) {
+                    Ok(mut etag_file) => match write!(etag_file, "{}", new_etag_val.unwrap()) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!(
+                                "Failed to write assets/{asset}.etag! Asset will always be redownloaded. Err: {e}"
+                            )
+                        }
+                    },
+                    Err(e) => error!(
+                        "Failed to write assets/{asset}.etag! Asset will always be redownloaded. Err: {e}"
+                    ),
+                }
+            }
+
+            format!("Updated {asset}")
+            }));
         }
     }
+
+    // Wait for all the downloads to complete
+    while let Some(result) = tasks.next().await {
+        info!("{result}");
+    }
+
+    info!("Finished updating assets!");
 
     Ok(())
 }
