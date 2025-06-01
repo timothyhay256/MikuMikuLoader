@@ -33,6 +33,10 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      - name: Grab assets needed for build
+        run: |
+          cp -rv /opt/MikuMikuLoader-Assets/assets ./
+
       - name: Set up osxcross (macOS only)
         if: startsWith(matrix.platform.os_name, 'macOS')
         run: |
