@@ -62,7 +62,9 @@ async fn main() {
 
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
-    let ansi_enabled = true;
+    // Needed since below is Windows only
+    #[allow(unused_mut)]
+    let mut ansi_enabled = true;
 
     #[cfg(windows)] // Allow Windows users to view colored output
     match ansi_term::enable_ansi_support() {
