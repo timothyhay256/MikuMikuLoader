@@ -12,7 +12,7 @@ colored = "3.0.0"
 tokio = "1.45.0"
 axum = "0.8.4"
 axum-server = "0.7.2"
-tower-http = { version = "0.6.4", features = ["fs"] }
+tower-http = { version = "0.6.5", features = ["fs"] }
 hyper-rustls = "0.27.5"
 hyper-util = "0.1.11"
 serde_json = "1.0.140"
@@ -27,7 +27,7 @@ ansi_term = "0.12.1"
 rust-embed = "8.7.2"
 mime_guess = "2.0.5"
 regex = "1.11.1"
-reqwest = "0.12.18"
+reqwest = "0.12.19"
 futures = "0.3.31"
 
 [build-dependencies]
