@@ -1,8 +1,8 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 // Contains all relevant data that makes up a scenario. Used to adapt between Sekai Stories and AssetBundles.
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ScenarioAdapter {
     pub name: String,
     pub scenario_id: String,
@@ -17,6 +17,11 @@ pub struct ScenarioAdapter {
 
     pub when_finish_close_window: bool,
     pub require_play_effect: bool,
+
+    pub special_effects: Vec<ScenarioAdapterSpecialEffect>,
+    pub sound: Vec<ScenarioAdapterSoundData>,
+
+    pub needed_bundles: Vec<ScenarioAdapterNeededBundles>,
 
     pub appear_characters: Vec<ScenarioAdapterAppearCharacters>,
     pub talk_data: Vec<ScenarioAdapterTalkData>,
@@ -36,6 +41,9 @@ impl Default for ScenarioAdapter {
             font_size: 0.0,
             when_finish_close_window: true,
             require_play_effect: false,
+            special_effects: Vec::new(),
+            sound: Vec::new(),
+            needed_bundles: Vec::new(),
             appear_characters: Vec::new(),
             talk_data: Vec::new(),
             character_layout: Vec::new(),
@@ -43,14 +51,14 @@ impl Default for ScenarioAdapter {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 pub struct ScenarioAdapterAppearCharacters {
     // SEKAI Stories needs to fill this, no default is provided
     pub character_2d_id: i32,
     pub character_costume: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ScenarioAdapterTalkData {
     pub character_2d_id: i32,
     pub display_name: String,
@@ -58,12 +66,8 @@ pub struct ScenarioAdapterTalkData {
     pub talk_tention: i32,
     pub lib_sync: i32,
 
-    pub motion: Vec<ScenarioAdapterTalkDataMotion>,
-    pub voice: Vec<ScenarioAdapterTalkDataVoices>,
-    pub special_effects: Vec<ScenarioAdapterSpecialEffect>,
-    pub sound: Vec<ScenarioAdapterSoundData>,
-
-    pub needed_bundles: ScenarioAdapterNeededBundles,
+    pub motion: ScenarioAdapterTalkDataMotion,
+    pub voice: ScenarioAdapterTalkDataVoices,
 }
 
 impl Default for ScenarioAdapterTalkData {
@@ -74,16 +78,13 @@ impl Default for ScenarioAdapterTalkData {
             text: "Scene text".to_string(),
             talk_tention: 0,
             lib_sync: 1,
-            motion: Vec::new(),
-            voice: Vec::new(),
-            special_effects: Vec::new(),
-            sound: Vec::new(),
-            needed_bundles: ScenarioAdapterNeededBundles::default(),
+            motion: ScenarioAdapterTalkDataMotion::default(),
+            voice: ScenarioAdapterTalkDataVoices::default(),
         }
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ScenarioAdapterTalkDataMotion {
     pub motion_name: String,
     pub facial_name: String,
@@ -98,7 +99,7 @@ impl Default for ScenarioAdapterTalkDataMotion {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ScenarioAdapterTalkDataVoices {
     pub voice_id: String,
     pub volume: f32,
@@ -113,16 +114,16 @@ impl Default for ScenarioAdapterTalkDataVoices {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ScenarioAdapterCharacterLayout {
     pub character_2d_id: i32,
-    pub layout_type: i32,
+    pub layout_type: i32, // TODO: What is this
     pub depth_type: i32,
     pub move_speed_type: i32,
 
-    pub side_from: i32,
+    pub side_from: i32, // TODO: What is this also
     pub side_from_offset_x: f32,
-    pub side_to: i32,
+    pub side_to: i32, // TODO: What is this
     pub side_to_offset_x: f32,
 
     pub costume_type: String,
@@ -130,7 +131,27 @@ pub struct ScenarioAdapterCharacterLayout {
     pub motion: ScenarioAdapterTalkDataMotion,
 }
 
-#[derive(Debug, Deserialize)]
+impl Default for ScenarioAdapterCharacterLayout {
+    fn default() -> Self {
+        ScenarioAdapterCharacterLayout {
+            character_2d_id: 286,
+            layout_type: 1,
+            depth_type: 1,
+            move_speed_type: 0,
+            side_from: 4,
+            side_from_offset_x: 0.0,
+            side_to: 4,
+            side_to_offset_x: 4.0,
+            costume_type: "".to_string(),
+            motion: ScenarioAdapterTalkDataMotion {
+                motion_name: "".to_string(),
+                facial_name: "".to_string(),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ScenarioAdapterSpecialEffect {
     pub effect_type: i32,
     pub duration: f32,
@@ -140,7 +161,7 @@ pub struct ScenarioAdapterSpecialEffect {
     pub string_sub: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ScenarioAdapterSoundData {
     pub play_mode: i32,
 
@@ -152,39 +173,30 @@ pub struct ScenarioAdapterSoundData {
     pub duration: f32,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 pub struct ScenarioAdapterNeededBundles {
     pub bundle_names: Vec<String>,
     pub sound_bundle_names: Vec<String>,
 }
 
-impl Default for ScenarioAdapterNeededBundles {
-    fn default() -> Self {
-        ScenarioAdapterNeededBundles {
-            bundle_names: Vec::new(),
-            sound_bundle_names: Vec::new(),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ScenarioAdapterCharacterLayoutMode {
     pub layouts: Vec<i32>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct CustomStory {
     pub file_name: String,
     pub data: Vec<CustomStoryScene>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct CustomStoryScene {
     pub index: i64,
     pub data: SekaiStoriesScene,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SekaiStoriesScene {
     pub last_modified: String,
@@ -193,28 +205,35 @@ pub struct SekaiStoriesScene {
     pub models: Vec<SekaiStoriesSceneModels>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SekaiStoriesSceneText {
     pub name_tag: String,
     pub dialogue: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SekaiStoriesSceneModels {
     pub from: String,
     pub character: String,
-    pub modelName: String,
-    pub modelTransform: SekaiStoriesSceneTransform,
-    pub modelExpression: i32,
-    pub modelPose: i32,
+    pub model_name: String,
+    pub model_transform: SekaiStoriesSceneTransform,
+    pub model_expression: i32,
+    pub model_pose: i32,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SekaiStoriesSceneTransform {
     pub x: i32,
     pub y: i32,
     pub scale: f32,
+}
+
+#[derive(Debug)] // Used to create a HashMap of characters and their associated data collected from the models field of SEKAI-Stories JSON
+pub struct CharacterData {
+    pub id: i32,
+    pub motion_name: String,
+    pub facial_name: String,
 }

@@ -18,7 +18,11 @@ use crate::{
     StaticFile,
     mods::{ModData, ModType},
     notify_mml,
-    scenario::{CustomStory, ScenarioAdapter, ScenarioAdapterTalkData, SekaiStoriesScene},
+    scenario::{
+        CharacterData, CustomStory, ScenarioAdapter, ScenarioAdapterCharacterLayout,
+        ScenarioAdapterTalkData, ScenarioAdapterTalkDataMotion, SekaiStoriesScene,
+    },
+    utils::{self, BuildMotionData},
 };
 
 #[derive(Debug, Deserialize)]
@@ -167,6 +171,7 @@ pub async fn gen_ca(Json(payload): Json<CAGenOptions>) -> impl IntoResponse {
 }
 
 pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl IntoResponse {
+    // TODO: Apply model transform
     info!("Received story export to modpack request at export_story endpoint: {payload:?}");
 
     // Load character2ds
@@ -185,6 +190,9 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
         mod_type: crate::mods::ModType::Story(ScenarioAdapter::default()),
     };
 
+    // Store all characters and their expressions while looping through models to be used later
+    let mut character_expressions: Option<HashMap<String, CharacterData>> = None;
+
     // We don't use an implementation because the CustomStory type is likely to change often, so we just do it all here
     let ModType::Story(adapter) = &mut modpack.mod_type;
 
@@ -196,52 +204,219 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
         .to_owned();
 
     // Loop through all the scenes to push the relevant data
-    for scene in payload.data {
+    for scene in payload.data.iter() {
         // Populate appear_characters, and use the grabbed id to populate talk_data at the same time
-        for model in scene.data.models {
+        for model in &scene.data.models {
             if model.from == "sekai" {
-                // Removes costume name from character name
-                let asset_prefix = match model.modelName.rfind('_') {
-                    Some(idx) => &model.modelName[..idx],
-                    None => &model.modelName,
-                };
+                // Keep trying to remove costume name, looping in case there are multiple subsets to the costume until we find a match.
+                // TODO: Why in the world does character2ds include multiple identical entries to characters? What are the differences?
+                let mut asset_prefix = model.model_name.as_str();
+                let character_id = loop {
+                    if let Some(item) = character2ds_map.get(asset_prefix) {
+                        break item.character_id;
+                    }
 
-                let character_id = {
-                    match character2ds_map.get(asset_prefix) {
-                        Some(item) => item.character_id,
+                    match asset_prefix.rfind('_') {
+                        Some(idx) => asset_prefix = &asset_prefix[..idx],
                         None => {
                             error!(
-                                "Could not find a matching Character2DId for {}, using Miku!",
-                                model.character
+                                "Could not find a matching Character2DId for {}, using Miku! character2ds_map: {character2ds_map:?}",
+                                model.model_name
                             );
-                            21
+                            break 21;
                         }
                     }
                 };
 
-                adapter // Push character to appear_characters
-                    .appear_characters
-                    .push(crate::scenario::ScenarioAdapterAppearCharacters {
-                        character_2d_id: { character_id },
-                        character_costume: model.modelName,
-                    });
+                // Use BuildMotionData to determine the expression and pose, since SEKAI-Stories uses an index in the serialized JSON
+                character_expressions.get_or_insert_with(HashMap::new).insert(model.character.clone(), {
+       
+                    let char_map = utils::build_character_map();
 
-                adapter.talk_data.push(ScenarioAdapterTalkData {
-                    // Push character to talk_data (which will have other fields filled later)
-                    character_2d_id: character_id,
-                    display_name: model.character.to_uppercase(),
-                    ..Default::default()
-                })
+                    if let Some(full_id) = char_map.get(&model.character) {
+                        let build_motion_data_path =
+                            format!("assets/{full_id}/{}_motion_base/BuildMotionData.json", full_id.replace("_", ""));
+
+                        debug!("Trying to read build motion data from {build_motion_data_path}");
+
+                        let character_build_motion_file = fs::File::open(&build_motion_data_path).unwrap_or_else(|_| panic!("Could not read {}! Please remove the assets folder and try again to redownload assets.", &build_motion_data_path));
+
+                        let character_build_motion: BuildMotionData = serde_json::from_reader(
+                            character_build_motion_file,
+                        )
+                        .unwrap_or_else(|_| panic!("{build_motion_data_path} is not formatted properly! Check if MikuMikuLoader is out of date."));
+
+                        // SEKAI-Stories starts at 0
+                        let mut result_expression = None;
+                        let mut result_pose = None;
+
+                        for (pos, expression) in
+                            character_build_motion.expressions.iter().enumerate()
+                        {
+                            if pos == model.model_expression as usize {
+                                result_expression = Some(expression.clone())
+                            }
+                        }
+
+                        for (pos, pose) in character_build_motion.motions.iter().enumerate() {
+                            if pos == model.model_pose as usize {
+                                result_pose = Some(pose.clone())
+                            }
+                        }
+
+                        let result_expression = {
+                            match result_expression {
+                                Some(expression) => expression,
+                                None => {
+                                    if model.model_expression == 99999 { // SEKAI-Stories uses this as the default expression definition
+                                        "face_normal_01".to_string()
+                                    } else {
+                                        error!(
+                                        "Could not find expression {}! Please create a bug report. The expression will be replaced with face_cry_01",
+                                        model.model_expression
+                                    );
+                                        "face_cry_01".to_string()
+                                    }
+                                }
+                            }
+                        };
+
+                        let result_pose = {
+                            match result_pose {
+                                Some(pose) => pose,
+                                None => {
+                                    if model.model_pose == 99999 { // SEKAI-Stories uses this as the default pose definition
+                                        "w-adult-blushed01".to_string() // TODO: Find a better default pose.
+                                    } else {
+                                        error!(
+                                        "Could not find expression {}! Please create a bug report. The expression will be replaced with w-cute-glad01",
+                                        model.model_pose
+                                    );
+                                        "w-cute-glad01".to_string()
+                                    }
+                                }
+                            }
+                        };
+
+                        CharacterData {
+                            id: character_id,
+                            motion_name: result_pose,
+                            facial_name: result_expression,
+                        }
+                    } else {
+                        error!(
+                            "Could not find character {}! Please create a bug report. The expression will be replaced with face_cry_01, and the pose will be replaced with w-cute-glad01",
+                            "face_cry_01"
+                        );
+
+                        CharacterData {
+                            id: 286,
+                            motion_name: "w-cute-glad01".to_string(),
+                            facial_name: "face_cry_01".to_string()
+                        }
+                    }
+                });
+
+                let character_to_push = crate::scenario::ScenarioAdapterAppearCharacters {
+                    character_2d_id: { character_id },
+                    character_costume: model.model_name.clone(),
+                };
+
+                if !adapter.appear_characters.contains(&character_to_push) {
+                    adapter // Push character to appear_characters
+                        .appear_characters
+                        .push(crate::scenario::ScenarioAdapterAppearCharacters {
+                            character_2d_id: { character_id },
+                            character_costume: model.model_name.clone(),
+                        });
+                }
+
+                // TODO: Actually apply offsets here
+                adapter
+                    .character_layout
+                    .push(ScenarioAdapterCharacterLayout {
+                        ..Default::default()
+                    })
             } else {
-                error!("Only characters from Project Sekai are currently supported!");
+                error!(
+                    "Only characters from Project Sekai are currently supported! Skipping {}",
+                    model.character
+                );
                 notify_mml(
                     "Found a non-Sekai character in cust story. Only characters from Project Sekai are currently supported!",
                 );
             }
         }
+
+        // Apply text and stories
+        let character_name = &scene.data.text.name_tag.to_lowercase();
+
+        match character_expressions {
+            Some(ref character_expressions) => {
+                match character_expressions.get(character_name) {
+                    Some(character) => {
+                        adapter.talk_data.push(ScenarioAdapterTalkData {
+                            // Push character to talk_data (which will have other fields filled later)
+                            character_2d_id: character.id,
+                            display_name: capitalize(character_name),
+                            text: scene.data.text.dialogue.clone(),
+                            motion: ScenarioAdapterTalkDataMotion {
+                                motion_name: character.motion_name.clone(),
+                                facial_name: character.facial_name.clone(),
+                            },
+                            ..Default::default()
+                        });
+                    }
+                    None => {
+                        error!(
+                            "Could not find {character_name} in {character_expressions:?}! Please file a bug report. Default character will be used."
+                        );
+                        adapter.talk_data.push(ScenarioAdapterTalkData::default())
+                    }
+                }
+            }
+            None => {
+                error!(
+                    "No characters were correctly initialized in the last step. Tried to find {character_name} but character_expressions is None"
+                );
+                return "No compatible characters could be found. Please make sure all chracters in each scene are Project Sekai characters! Support for non-Sekai characters is not yet implemented.".to_string();
+            }
+        }
     }
 
-    Json("Success")
+    let output_file = fPath::new(&payload.file_name);
+
+    if output_file.exists() {
+        format!(
+            "{} already exists! Please rename your file.",
+            output_file.display()
+        )
+    } else {
+        match toml::to_string_pretty(&modpack) {
+            Ok(toml) => match std::fs::write(output_file, toml) {
+                Ok(_) => {
+                    info!(
+                        "Succesfully generated and saved modpack to {}",
+                        output_file.canonicalize().unwrap().display()
+                    );
+                    format!(
+                        "Successfully generated modpack! It was placed in {}",
+                        output_file.canonicalize().unwrap().display()
+                    )
+                }
+                Err(e) => format!("Failed to write to {:?}: {e}", output_file.canonicalize()),
+            },
+            Err(e) => format!("Failed to serialize modpack into TOML: {e}"),
+        }
+    }
+}
+
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+    }
 }
 
 pub async fn index_handler() -> impl IntoResponse {

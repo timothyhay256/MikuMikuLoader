@@ -7,5 +7,34 @@ sekai_injector_config_path = "sekai-injector.toml"
 asset_path = "assets"
 common_asset_url = "raw.githubusercontent.com/Sekai-World/sekai-master-db-diff/refs/heads/main"
 template_asset_url = "raw.githubusercontent.com/timothyhay256/MML-templates/refs/heads/main"
+live2d_asset_url = "storage.sekai.best/sekai-live2d-assets/live2d/motion/v1/main"
 needed_asset_files = ["character2ds.json"]
 needed_template_files = ["story/scenario/template.yaml"]
+needed_live2d_files = [
+    "01_ichika/01ichika_motion_base/BuildMotionData.json",
+    "02_saki/02saki_motion_base/BuildMotionData.json",
+    "03_honami/03honami_motion_base/BuildMotionData.json",
+    "04_shiho/04shiho_motion_base/BuildMotionData.json",
+    "05_minori/05minori_motion_base/BuildMotionData.json",
+    "06_haruka/06haruka_motion_base/BuildMotionData.json",
+    "07_airi/07airi_motion_base/BuildMotionData.json",
+    "08_shizuku/08shizuku_motion_base/BuildMotionData.json",
+    "09_kohane/09kohane_motion_base/BuildMotionData.json",
+    "10_an/10an_motion_base/BuildMotionData.json",
+    "11_akito/11akito_motion_base/BuildMotionData.json",
+    "12_touya/12touya_motion_base/BuildMotionData.json",
+    "13_tsukasa/13tsukasa_motion_base/BuildMotionData.json",
+    "14_emu/14emu_motion_base/BuildMotionData.json",
+    "15_nene/15nene_motion_base/BuildMotionData.json",
+    "16_rui/16rui_motion_base/BuildMotionData.json",
+    "17_kanade/17kanade_motion_base/BuildMotionData.json",
+    "18_mafuyu/18mafuyu_motion_base/BuildMotionData.json",
+    "19_ena/19ena_motion_base/BuildMotionData.json",
+    "20_mizuki/20mizuki_motion_base/BuildMotionData.json",
+    "21_miku/21miku_motion_base/BuildMotionData.json",
+    "22_rin/22rin_motion_base/BuildMotionData.json",
+    "23_len/23len_motion_base/BuildMotionData.json",
+    "24_luka/24luka_motion_base/BuildMotionData.json",
+    "25_meiko/25meiko_motion_base/BuildMotionData.json",
+    "26_kaito/26kaito_motion_base/BuildMotionData.json",
+]

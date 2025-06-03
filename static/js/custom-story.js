@@ -71,7 +71,19 @@ function addScene() {
 
         try {
             const parsed = JSON.parse(jsonText);
-            scenesData.push({ index: parseInt(newIndex), data: parsed });
+            const item = { index: parseInt(newIndex), data: parsed };
+
+            const exists = scenesData.some(existingItem =>
+                existingItem.index === item.index &&
+                JSON.stringify(existingItem.data) === JSON.stringify(item.data)
+            );
+
+            if (!exists) {
+                scenesData.push(item);
+            } else {
+                console.log("scenesData already includes scene, not pushing!");
+            }
+
             alert("Scene saved!");
         } catch (e) {
             alert("Invalid JSON: " + e.message);
@@ -116,7 +128,7 @@ document.getElementById("submit-scenes").addEventListener("click", function (eve
 document.getElementById("generate-mod").addEventListener("click", function (event) {
     event.preventDefault();
 
-    const storyFile = document.getElementById("storyfile").value;
+    const storyFile = document.getElementById("modpackfile").value;
     const data = JSON.stringify({
         file_name: storyFile,
         data: scenesData
@@ -136,10 +148,10 @@ document.getElementById("generate-mod").addEventListener("click", function (even
                 throw new Error("Network response was not ok");
             }
 
-            return response.json();
+            return response.text();
         })
         .then(data => {
-            alert(data);
+            alert(data.text());
         })
         .catch(error => {
             console.error("Error:", error);
@@ -196,6 +208,8 @@ fileSelector.addEventListener('change', (event) => {
                 scenes.removeChild(scenes.lastElementChild);
             }
         }
+
+        scenesData = [];
 
         for (var i = 0; i < arr.scenesData.length; i++) {
             index = arr.scenesData[i].index;

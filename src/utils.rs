@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::Deserialize;
 
 #[derive(Deserialize, Default)]
@@ -71,4 +73,43 @@ impl Default for AssetConfig {
             ],
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BuildMotionData {
+    pub expressions: Vec<String>,
+    pub motions: Vec<String>,
+}
+
+pub fn build_character_map() -> HashMap<String, &'static str> {
+    let mut map = HashMap::new();
+
+    map.insert("ichika".to_string(), "01_ichika");
+    map.insert("saki".to_string(), "02_saki");
+    map.insert("honami".to_string(), "03_honami");
+    map.insert("shiho".to_string(), "04_shiho");
+    map.insert("minori".to_string(), "05_minori");
+    map.insert("haruka".to_string(), "06_haruka");
+    map.insert("airi".to_string(), "07_airi");
+    map.insert("shizuku".to_string(), "08_shizuku");
+    map.insert("kohane".to_string(), "09_kohane");
+    map.insert("an".to_string(), "10_an");
+    map.insert("akito".to_string(), "11_akito");
+    map.insert("touya".to_string(), "12_touya");
+    map.insert("tsukasa".to_string(), "13_tsukasa");
+    map.insert("emu".to_string(), "14_emu");
+    map.insert("nene".to_string(), "15_nene");
+    map.insert("rui".to_string(), "16_rui");
+    map.insert("kanade".to_string(), "17_kanade");
+    map.insert("mafuyu".to_string(), "18_mafuyu");
+    map.insert("ena".to_string(), "19_ena");
+    map.insert("mizuki".to_string(), "20_mizuki");
+    map.insert("miku".to_string(), "21_miku");
+    map.insert("rin".to_string(), "22_rin");
+    map.insert("len".to_string(), "23_len");
+    map.insert("luka".to_string(), "24_luka");
+    map.insert("meiko".to_string(), "25_meiko");
+    map.insert("kaito".to_string(), "26_kaito");
+
+    map
 }
