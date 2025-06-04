@@ -151,7 +151,7 @@ document.getElementById("generate-mod").addEventListener("click", function (even
             return response.text();
         })
         .then(data => {
-            alert(data.text());
+            alert(data);
         })
         .catch(error => {
             console.error("Error:", error);

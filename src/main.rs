@@ -201,6 +201,7 @@ async fn main() {
         .route_service("/server-status", get(routes::server_status_handler))
         .route_service("/custom-story", get(routes::custom_story_handler))
         .route_service("/cert-gen", get(routes::cert_gen_handler))
+        .route_service("/mod-manager", get(routes::mod_manager_handler))
         .route("/{*file}", get(static_handler));
 
     let api_routes = Router::new()
@@ -208,6 +209,7 @@ async fn main() {
         .route("/total-proxied", get(routes::total_proxied))
         .route("/total-requests", get(routes::requests))
         .route("/set-param/{:param}", get(routes::set_serve_param))
+        .route("/toggle-mod/{:param}", get(routes::toggle_mod))
         .route("/generate-ca", post(routes::gen_ca))
         .route("/generate-cert", post(routes::gen_cert))
         .route(
@@ -216,6 +218,7 @@ async fn main() {
         )
         .route("/local-ip", get(routes::return_local_ip))
         .route("/version", get(routes::return_version))
+        .route("/mod-list", get(routes::mod_list))
         .with_state(Arc::clone(&manager));
 
     let webui_app = static_routes.merge(api_routes);

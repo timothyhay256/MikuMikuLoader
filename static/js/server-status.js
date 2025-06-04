@@ -11,15 +11,23 @@ async function updateStats() {
 
     list.innerHTML = ""; // Clear previous items
 
-    for (let i of totalRequestsJson) {
-        const item = document.createElement("li");
-        var [status, path, injected_path] = i;
+    if (Object.keys(totalRequestsJson).length > 0) {
+        for (let i of totalRequestsJson) {
+            const item = document.createElement("li");
+            var [status, path, injected_path] = i;
 
-        if (injected_path == null) {
-            injected_path = "No file injected";
+            if (injected_path == null) {
+                injected_path = "No file injected";
+            }
+
+            item.innerHTML = `<strong>${status}</strong>: <code>${path}</code> <strong><-</strong> <code>${injected_path}</code>`;
+            list.appendChild(item);
         }
+    } else {
+        const item = document.createElement("li");
 
-        item.innerHTML = `<strong>${status}</strong>: <code>${path}</code> <strong><-</strong> <code>${injected_path}</code>`;
+        item.innerHTML = '<strong>No requests received.</strong>'
+
         list.appendChild(item);
     }
 }

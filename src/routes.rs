@@ -1,4 +1,11 @@
-use std::{collections::HashMap, default, env, fs, path::Path as fPath, sync::Arc};
+use std::{
+    collections::HashMap,
+    default, env,
+    fs::{self, create_dir},
+    io::Read,
+    path::Path as fPath,
+    sync::Arc,
+};
 
 use axum::{
     Json,
@@ -11,8 +18,9 @@ use log::{debug, error, info};
 use sekai_injector::{
     CertificateGenParams, Manager, RequestParams, generate_ca, new_self_signed_cert,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
+use walkdir::WalkDir;
 
 use crate::{
     StaticFile,
@@ -56,6 +64,13 @@ pub struct Character2DS {
     asset_name: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct ModList {
+    name: String,
+    enabled: bool,
+    mod_type: ModType,
+}
+
 // TODO: Use SSE and channels
 pub async fn total_passthrough(State(state): State<Arc<RwLock<Manager>>>) -> impl IntoResponse {
     state.read().await.statistics.request_count.0.to_string()
@@ -82,10 +97,102 @@ pub async fn set_serve_param(
             info!("Server stop requested by web");
             state.write().await.config.inject_resources = true
         }
+        "restart" => {
+            info!("Server restart requested by web");
+            // TODO
+        }
         _ => return "invalid command".to_string(),
     }
 
     "Success".to_string()
+}
+
+pub async fn toggle_mod(Path(param): Path<String>) -> impl IntoResponse {
+    // Reads current mod status and just flips it. Server restart re-reads all mods in folder, so this should be fine.
+    let mod_path = fPath::new(&param);
+
+    info!("Toggle {} requested by web", mod_path.display());
+
+    if mod_path.exists() {
+        let mod_data = fs::read_to_string(mod_path).unwrap_or_else(|_| {
+            panic!(
+                "Could not read {}! Please try redownloading mods and fixing permissions.",
+                mod_path.display()
+            )
+        });
+
+        let mut mod_data: ModData = toml::from_str(&mod_data).unwrap_or_else(|_| {
+            panic!(
+                "{} is not formatted properly! Check if MikuMikuLoader is out of date.",
+                mod_path.display()
+            )
+        });
+
+        mod_data.enabled = !mod_data.enabled;
+
+        match toml::to_string_pretty(&mod_data) {
+            Ok(toml) => match std::fs::write(mod_path, toml) {
+                Ok(_) => {
+                    info!(
+                        "Succesfully toggled {}",
+                        mod_path.canonicalize().unwrap().display()
+                    );
+                    format!("Toggled {}", mod_path.canonicalize().unwrap().display())
+                }
+                Err(e) => format!("Failed to write to {:?}: {e}", mod_path.canonicalize()),
+            },
+            Err(e) => format!("Failed to serialize modpack into TOML: {e}"),
+        }
+    } else {
+        format!("Couldn't find {} to toggle!", mod_path.display())
+    }
+}
+
+pub async fn mod_list() -> impl IntoResponse {
+    debug!("mod list requested by web");
+    let mod_path = fPath::new("mods");
+
+    let mut list: Vec<(String, String, String, bool)> = Vec::new(); // Path, name, type, enabled
+
+    if !mod_path.exists() {
+        Json(list)
+    } else {
+        for entry in WalkDir::new(mod_path) {
+            match entry {
+                Ok(entry) => {
+                    if entry.file_type().is_file()
+                        && entry.path().extension().and_then(|e| e.to_str()) == Some("toml")
+                    {
+                        let entry_data = fs::read_to_string(entry.path()).unwrap_or_else(|_| {
+                            panic!(
+                                "Could not read {}! Please try redownloading mods and fixing permissions.",
+                                entry.path().display()
+                            )
+                        });
+
+                        let mod_data: ModData = toml::from_str(&entry_data).unwrap_or_else(|_| {
+                            panic!(
+                                "{} is not formatted properly! Check if MikuMikuLoader is out of date.",
+                                entry.path().display()
+                            )
+                        });
+
+                        list.push((
+                            entry.path().display().to_string(),
+                            mod_data.mod_name,
+                            mod_data.mod_type.variant_name().to_owned(),
+                            mod_data.enabled,
+                        ));
+                    }
+                }
+                Err(ref e) => {
+                    error!("Could not read {entry:?}, skipping scan. Err: {e}");
+                }
+            }
+        }
+        debug!("Returning modlist: {list:?}");
+        Json(list)
+    }
 }
 
 pub async fn return_local_ip() -> impl IntoResponse {
@@ -187,6 +294,8 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
         .collect();
 
     let mut modpack = ModData {
+        mod_name: payload.file_name.replace(".toml", ""),
+        enabled: true,
         mod_type: crate::mods::ModType::Story(ScenarioAdapter::default()),
     };
 
@@ -230,7 +339,6 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
 
                 // Use BuildMotionData to determine the expression and pose, since SEKAI-Stories uses an index in the serialized JSON
                 character_expressions.get_or_insert_with(HashMap::new).insert(model.character.clone(), {
-       
                     let char_map = utils::build_character_map();
 
                     if let Some(full_id) = char_map.get(&model.character) {
@@ -384,7 +492,27 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
         }
     }
 
-    let output_file = fPath::new(&payload.file_name);
+    let file_name = {
+        if payload.file_name.contains(".toml") {
+            payload.file_name
+        } else {
+            format!("{}.toml", payload.file_name)
+        }
+    };
+
+    let output_file_path = format!("mods/{file_name}");
+    let output_file = fPath::new(&output_file_path);
+
+    if !fPath::new("mods").exists() {
+        match create_dir("mods") {
+            Ok(_) => {}
+            Err(e) => {
+                error!(
+                    "Could not create mods dir, will try to continue with saving but will likely fail! Err: {e}"
+                )
+            }
+        }
+    }
 
     if output_file.exists() {
         format!(
@@ -433,6 +561,10 @@ pub async fn cert_gen_handler() -> impl IntoResponse {
 
 pub async fn server_status_handler() -> impl IntoResponse {
     static_handler("/server-status.html".parse::<Uri>().unwrap()).await
+}
+
+pub async fn mod_manager_handler() -> impl IntoResponse {
+    static_handler("/mod-manager.html".parse::<Uri>().unwrap()).await
 }
 
 pub async fn static_handler(uri: Uri) -> impl IntoResponse {

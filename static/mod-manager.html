@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>MikuMikuLoader Mod Manager</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+
+<body style="background-color: #33939c">
+    <a id="downloadAnchorElem" style="display:none"></a>
+
+    <h1 style="color: #f9c5ff;">Manage Mods</h1>
+    <h2 style="color: #f9c5ff; margin-top: -1%;"><a style="text-decoration: none;" href="/">Home</a></h2>
+    <div id="main-text">
+        <h2>Installed mods:</h2>
+        <p style="font-size: 18px; width: 40%; text-align: center; margin: 0 auto; color: yellow">Please note that
+            having multiple mods enabled at once may cause multiple issues, including crashes.
+        </p><br>
+        <div id="list">
+            <ol id="olist" style="text-align: center;"></ol>
+        </div>
+        <br>
+        <button id="submit-mods">Apply changes and restart server</button>
+    </div>
+
+    <script src="/js/mod-manager.js"></script>
+
+</body>
