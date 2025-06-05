@@ -40,7 +40,8 @@ impl Default for AssetConfig {
                     .to_string(),
             template_asset_url:
                 "raw.githubusercontent.com/timothyhay256/MML-templates/refs/heads/main".to_string(),
-            live2d_asset_url: "sekai-stories.pages.dev".to_string(),
+            live2d_asset_url: "storage.sekai.best/sekai-live2d-assets/live2d/motion/v1/main"
+                .to_string(),
             needed_asset_files: vec!["/character2ds.json".to_string()],
             needed_template_files: vec!["/story/scenario/template.yaml".to_string()],
             needed_live2d_files: vec![
