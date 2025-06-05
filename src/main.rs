@@ -343,6 +343,7 @@ pub fn configure_dns(config: &Config) -> DConfig {
 }
 
 pub async fn update_assets(asset_config: AssetConfig) -> Result<(), Box<dyn Error>> {
+    // TODO: Implement retries
     notify_mml("Checking assets for updates...");
 
     let client = reqwest::Client::new();
@@ -370,11 +371,11 @@ pub async fn update_assets(asset_config: AssetConfig) -> Result<(), Box<dyn Erro
 
             info!("Updating {url}");
 
-            let resp = client // Just grabs HEAD
-                .head(&url)
-                .send()
-                .await
-                .unwrap();
+            let resp_result = client.head(&url).send().await;
+            let resp = match resp_result {
+                Ok(resp) => { resp }
+                Err(e) => panic!("Request failed: {e:?}"),
+            };
 
             let mut new_etag_val: Option<&str> = None;
 
