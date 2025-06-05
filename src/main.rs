@@ -433,7 +433,7 @@ pub async fn update_assets(asset_config: AssetConfig) -> Result<(), Box<dyn Erro
                 std::io::copy(&mut content, &mut file).expect("Failed to write asset to file");
             }
 
-            if etag_needs_update {
+            if etag_needs_update && new_etag_val.is_some() {
                 // Update etag
                 debug!("Storing etag for {asset}");
 
