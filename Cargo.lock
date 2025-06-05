@@ -2893,8 +2893,7 @@ dependencies = [
 [[package]]
 name = "simple-dns-server"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ea4db310825b61276c2e4e94623dfd04c82f5fbeb939323abc01a2c1e268784"
+source = "git+https://github.com/timothyhay256/simple-dns#bbdc8b9cb0d109ea9c1dec8d438e6c8962b93cca"
 dependencies = [
  "futures",
  "serde",

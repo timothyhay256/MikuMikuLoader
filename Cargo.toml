@@ -31,7 +31,7 @@ regex = "1.11.1"
 reqwest = "0.12.19"
 futures = "0.3.31"
 walkdir = "2.5.0"
-simple-dns-server = "0.1.0"
+simple-dns-server = { git = "https://github.com/timothyhay256/simple-dns" }
 
 [build-dependencies]
 serde = { version = "1.0.219", features = ["derive"] }

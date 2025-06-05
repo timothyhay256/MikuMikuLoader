@@ -1,13 +1,15 @@
+mod dns;
 mod mods;
 mod routes;
 mod scenario;
 mod utils;
 
 use std::{
+    collections::BTreeMap,
     error::Error,
     fs::{File, create_dir_all},
     io::Cursor,
-    net::SocketAddr,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     panic,
     path::Path,
     pin::Pin,
@@ -32,7 +34,8 @@ use log::{debug, error, info, warn};
 use notify_rust::Notification;
 use routes::static_handler;
 use rust_embed::Embed;
-use sekai_injector::{Manager, ServerStatistics, load_injection_map, serve};
+use sekai_injector::{Config, Manager, ServerStatistics, load_injection_map, serve};
+use simple_dns_server::{Config as DConfig, RecordInfo, RecordType, SimpleDns};
 use std::io::Read;
 use std::io::Write;
 use tokio::{sync::RwLock, task};
@@ -172,6 +175,27 @@ async fn main() {
         }
     }
 
+    // Configure and create DNS server
+
+    let dns_server = SimpleDns::try_load(configure_dns(&injector_config_holder))
+        .await
+        .expect("Failed to configure DNS server. Please file a bug report.");
+
+    let dns_server_handle = task::spawn(async move {
+        info!("Starting DNS server");
+
+        match dns_server.run().await {
+            Ok(_) => {
+                info!("DNS server exited normally");
+                Ok(())
+            }
+            Err(e) => {
+                error!("DNS server exited with error: {e}");
+                Err(e)
+            }
+        }
+    });
+
     // We build the manager here so that it can be reused in other routes.
 
     let injection_hashmap = load_injection_map(&injector_config_holder.resource_config);
@@ -248,16 +272,36 @@ async fn main() {
 
     if sekai_injector_enabled {
         let backend_task = task::spawn(sekai_injector_serve(Arc::clone(&manager)));
-        match tokio::join!(backend_task, webui_server).0 {
+
+        let (backend_result, dns_result, webui_result) =
+            tokio::join!(backend_task, dns_server_handle, webui_server);
+
+        match backend_result {
             Ok(_) => {}
             Err(e) => {
                 notify_mml(&format!(
                     "You might need to run as root/admin.\nCould not start MikuMikuLoader: {e}\n\nCheck the log for more information!"
                 ));
             }
-        };
+        }
+
+        match dns_result {
+            Ok(Ok(_)) => println!("DNS server task completed successfully."),
+            Ok(Err(e)) => eprintln!("DNS server error: {e}"),
+            Err(e) => eprintln!("DNS server task panicked: {e}"),
+        }
+
+        webui_result.unwrap();
     } else {
-        tokio::join!(webui_server).0.unwrap();
+        let (webui_result, dns_result) = tokio::join!(webui_server, dns_server_handle);
+
+        webui_result.unwrap();
+
+        match dns_result {
+            Ok(Ok(_)) => println!("DNS server task completed successfully."),
+            Ok(Err(e)) => eprintln!("DNS server error: {e}"),
+            Err(e) => eprintln!("DNS server task panicked: {e}"),
+        }
     }
 }
 
@@ -278,6 +322,24 @@ pub fn notify_mml(body: &str) {
     {
         error!("Could not show desktop notification: {e}");
     }
+}
+
+// Reads Sekai Injector config and returns an DConfig that can be used to spawn a DNS server
+pub fn configure_dns(config: &Config) -> DConfig {
+    let bind = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 53);
+
+    let record_info = RecordInfo {
+        name: "@".to_string(),
+        records: vec![config.target_ip.to_string()],
+        record_type: RecordType::A,
+    };
+
+    let mut domains = BTreeMap::new();
+    domains.insert(config.upstream_host.clone(), vec![record_info]);
+
+    let conf = DConfig { bind, domains };
+    info!("DNS server config: {conf:?}");
+    conf
 }
 
 pub async fn update_assets(asset_config: AssetConfig) -> Result<(), Box<dyn Error>> {
