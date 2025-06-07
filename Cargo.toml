@@ -17,7 +17,6 @@ tower-http = { version = "0.6.5", features = ["fs"] }
 hyper-rustls = "0.27.5"
 hyper-util = "0.1.11"
 serde_json = "1.0.140"
-unity-yaml-rust = "0.1.1"
 local-ip-address = "0.6.5"
 gumdrop = "0.8.1"
 notify-rust = "4.11.7"
@@ -32,6 +31,7 @@ reqwest = "0.12.19"
 futures = "0.3.31"
 walkdir = "2.5.0"
 simple-dns-server = { git = "https://github.com/timothyhay256/simple-dns" }
+pyo3 = { version = "0.25.0", features = ["auto-initialize"] }
 
 [build-dependencies]
 serde = { version = "1.0.219", features = ["derive"] }

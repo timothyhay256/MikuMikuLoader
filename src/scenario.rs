@@ -1,7 +1,6 @@
 use std::error::Error;
 
 use serde::{Deserialize, Serialize};
-use unity_yaml_rust::Yaml;
 
 // Contains all relevant data that makes up a scenario. Used to adapt between Sekai Stories and AssetBundles.
 
@@ -241,7 +240,7 @@ pub struct CharacterData {
     pub facial_name: String,
 }
 
-pub fn scenario_to_assetbundle(adapter: ScenarioAdapter) -> Result<Yaml, Box<dyn Error>> {
+pub fn scenario_to_assetbundle(adapter: ScenarioAdapter) -> Result<(), Box<dyn Error>> {
     // Converts an ScenarioAdapter into the proper raw assetbundle format required
     todo!("implement");
 }

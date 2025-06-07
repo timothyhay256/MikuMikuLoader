@@ -5,10 +5,10 @@ sekai_injector_config_path = "sekai-injector.toml"
 
 [advanced.assets]
 asset_path = "assets"
-common_asset_url = "raw.githubusercontent.com/Sekai-World/sekai-master-db-diff/refs/heads/main"
+common_asset_url = "raw.githubusercontent.com/Sekai-World/sekai-master-db-en-diff/refs/heads/main"
 template_asset_url = "raw.githubusercontent.com/timothyhay256/MML-templates/refs/heads/main"
 live2d_asset_url = "storage.sekai.best/sekai-live2d-assets/live2d/motion/v1/main"
-needed_asset_files = ["character2ds.json"]
+needed_asset_files = ["character2ds.json", "versions.json"]
 needed_template_files = ["story/scenario/template.yaml"]
 needed_live2d_files = [
     "01_ichika/01ichika_motion_base/BuildMotionData.json",

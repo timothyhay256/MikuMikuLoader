@@ -1,4 +1,3 @@
-mod dns;
 mod mods;
 mod routes;
 mod scenario;
@@ -7,7 +6,7 @@ mod utils;
 use std::{
     collections::BTreeMap,
     error::Error,
-    fs::{File, create_dir_all},
+    fs::{self, File, create_dir_all},
     io::Cursor,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     panic,
@@ -35,6 +34,7 @@ use notify_rust::Notification;
 use routes::static_handler;
 use rust_embed::Embed;
 use sekai_injector::{Config, Manager, ServerStatistics, load_injection_map, serve};
+use serde::Deserialize;
 use simple_dns_server::{Config as DConfig, RecordInfo, RecordType, SimpleDns};
 use std::io::Read;
 use std::io::Write;
@@ -51,6 +51,19 @@ struct CommandOptions {
     verbose: bool,
     #[options(help = "specify a specific config file")]
     config: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Versions {
+    app_hash: String,
+    system_profile: String,
+    app_version: String,
+    multi_play_version: String,
+    asset_version: String,
+    app_version_status: String,
+    data_version: String,
+    asset_hash: String,
 }
 
 #[tokio::main]
@@ -156,6 +169,8 @@ async fn main() {
             sekai_injector::Config::default()
         }
     };
+
+    let injector_config_holder = update_injection_appversion(injector_config_holder); // Read versions.json and update resource_prefix if it is necessary.
 
     let mut sekai_injector_enabled = true;
 
@@ -342,6 +357,34 @@ pub fn configure_dns(config: &Config) -> DConfig {
     conf
 }
 
+pub fn update_injection_appversion(
+    injector_config: sekai_injector::Config,
+) -> sekai_injector::Config {
+    if injector_config.resource_prefix.is_some() {
+        warn!("Prefix is manually set, will not override with up-to-date apphash and version!");
+        injector_config
+    } else {
+        let versions_path = "assets/versions.json";
+        let mut injector_config = injector_config.clone();
+
+        debug!("Trying to read version data from {versions_path}");
+
+        let version_file = fs::File::open(versions_path).unwrap_or_else(|_| panic!("Could not read {}! Please remove the assets folder and try again to redownload assets.", &versions_path));
+
+        let versions: Versions = serde_json::from_reader(version_file).unwrap_or_else(|_| {
+            panic!(
+                "{versions_path} is not formatted properly! Check if MikuMikuLoader is out of date."
+            )
+        });
+
+        let prefix = format!("/{}/{}", versions.app_version, versions.app_hash);
+        debug!("Setting prefix to {prefix}");
+
+        injector_config.resource_prefix = Some(prefix);
+        injector_config
+    }
+}
+
 pub async fn update_assets(asset_config: AssetConfig) -> Result<(), Box<dyn Error>> {
     // TODO: Implement retries
     notify_mml("Checking assets for updates...");
@@ -464,6 +507,69 @@ pub async fn update_assets(asset_config: AssetConfig) -> Result<(), Box<dyn Erro
     }
 
     info!("Finished updating assets!");
+
+    Ok(())
+}
+
+fn decrypt(infile: &Path, outfile: &Path) -> std::io::Result<()> {
+    // All credit for figuring out decryption goes to https://github.com/mos9527
+
+    let mut fin = File::open(infile)?;
+    let mut magic = [0u8; 4];
+    fin.read_exact(&mut magic)?;
+
+    let mut fout = File::create(outfile)?;
+
+    if magic == [0x10, 0x00, 0x00, 0x00] {
+        for _ in (0..128).step_by(8) {
+            let mut block = [0u8; 8];
+            fin.read_exact(&mut block)?;
+            (0..5).for_each(|i| {
+                block[i] = !block[i];
+            });
+            fout.write_all(&block)?;
+        }
+        let mut buffer = [0u8; 8];
+        while fin.read_exact(&mut buffer).is_ok() {
+            fout.write_all(&buffer)?;
+        }
+    } else {
+        println!("copy {infile:?} -> {outfile:?}");
+        let mut buffer = [0u8; 8];
+        fout.write_all(&magic)?; // Write already-read magic
+        while fin.read_exact(&mut buffer).is_ok() {
+            fout.write_all(&buffer)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn encrypt(infile: &Path, outfile: &Path) -> std::io::Result<()> {
+    let mut fin = File::open(infile)?;
+    let mut fout = File::create(outfile)?;
+
+    // Write the magic number
+    fout.write_all(&[0x10, 0x00, 0x00, 0x00])?;
+
+    // Encrypt the first 128 bytes (16 blocks of 8 bytes)
+    for _ in (0..128).step_by(8) {
+        let mut block = [0u8; 8];
+        if fin.read_exact(&mut block).is_ok() {
+            (0..5).for_each(|i| {
+                block[i] = !block[i];
+            });
+            fout.write_all(&block)?;
+        } else {
+            break; // File is smaller than 128 bytes
+        }
+    }
+
+    // Copy the rest of the file as-is
+    let mut buffer = [0u8; 8];
+    while fin.read_exact(&mut buffer).is_ok() {
+        fout.write_all(&buffer)?;
+    }
 
     Ok(())
 }
