@@ -2794,7 +2794,7 @@ dependencies = [
 [[package]]
 name = "sekai_injector"
 version = "0.1.0"
-source = "git+https://github.com/timothyhay256/Sekai-Injector#f6636fa16c399d749db3259282d355194c519e5e"
+source = "git+https://github.com/timothyhay256/Sekai-Injector#8e017a1bb77c85c1db889fbf95db9a3c9e043c72"
 dependencies = [
  "axum",
  "axum-extra",
