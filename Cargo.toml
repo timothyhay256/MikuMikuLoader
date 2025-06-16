@@ -31,7 +31,7 @@ reqwest = "0.12.19"
 futures = "0.3.31"
 walkdir = "2.5.0"
 simple-dns-server = { git = "https://github.com/timothyhay256/simple-dns" }
-pyo3 = { version = "0.25.0", features = ["auto-initialize"] }
+pyo3 = { version = "0.25.1", features = ["auto-initialize"] }
 
 [build-dependencies]
 serde = { version = "1.0.219", features = ["derive"] }
