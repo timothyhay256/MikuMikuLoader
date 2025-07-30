@@ -24,7 +24,7 @@ use walkdir::WalkDir;
 
 use crate::{
     StaticFile,
-    mods::{ModData, ModType},
+    mods::{ModData, ModType, create_assetbundle},
     notify_mml,
     scenario::{
         CharacterData, CustomStory, ScenarioAdapter, ScenarioAdapterCharacterLayout,
@@ -515,10 +515,10 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
     }
 
     if output_file.exists() {
-        format!(
+        return format!(
             "{} already exists! Please rename your file.",
             output_file.display()
-        )
+        );
     } else {
         match toml::to_string_pretty(&modpack) {
             Ok(toml) => match std::fs::write(output_file, toml) {
@@ -527,15 +527,24 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
                         "Succesfully generated and saved modpack to {}",
                         output_file.canonicalize().unwrap().display()
                     );
-                    format!(
+                    info!(
                         "Successfully generated modpack! It was placed in {}",
                         output_file.canonicalize().unwrap().display()
                     )
                 }
-                Err(e) => format!("Failed to write to {:?}: {e}", output_file.canonicalize()),
+                Err(e) => {
+                    return format!("Failed to write to {:?}: {e}", output_file.canonicalize());
+                }
             },
-            Err(e) => format!("Failed to serialize modpack into TOML: {e}"),
+            Err(e) => return format!("Failed to serialize modpack into TOML: {e}"),
         }
+    }
+
+    info!("Converting modpack to AssetBundle...");
+
+    match create_assetbundle(modpack) {
+        Ok(_) => "Succesfully generated modpack and AssetBundle!".to_string(),
+        Err(e) => format!("Failed to convert modpack to AssetBundle: {e}"),
     }
 }
 

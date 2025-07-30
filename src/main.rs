@@ -7,10 +7,10 @@ use std::{
     collections::BTreeMap,
     error::Error,
     fs::{self, File, create_dir_all},
-    io::Cursor,
+    io::{Cursor, Read, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     panic,
-    path::Path,
+    path::{Path, PathBuf},
     pin::Pin,
     sync::Arc,
 };
@@ -22,10 +22,8 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-
 use colored::Colorize;
-use futures::StreamExt;
-use futures::stream::FuturesUnordered;
+use futures::{StreamExt, stream::FuturesUnordered};
 use gumdrop::Options;
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
@@ -36,12 +34,12 @@ use rust_embed::Embed;
 use sekai_injector::{Config, Manager, ServerStatistics, load_injection_map, serve};
 use serde::Deserialize;
 use simple_dns_server::{Config as DConfig, RecordInfo, RecordType, SimpleDns};
-use std::io::Read;
-use std::io::Write;
 use tokio::{sync::RwLock, task};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use utils::AssetConfig;
+
+use crate::mods::{ModData, create_assetbundle};
 
 #[derive(Debug, Options)]
 struct CommandOptions {
@@ -51,10 +49,14 @@ struct CommandOptions {
     verbose: bool,
     #[options(help = "specify a specific config file")]
     config: Option<String>,
+
+    #[options(command)]
+    command: Option<Command>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)] // All fields are needed to deserialize, but only two are actually read
 struct Versions {
     app_hash: String,
     system_profile: String,
@@ -64,6 +66,45 @@ struct Versions {
     app_version_status: String,
     data_version: String,
     asset_hash: String,
+}
+
+#[derive(Debug, Options)]
+enum Command {
+    #[options(help = "decrypt assetbundle")]
+    Decrypt(DecryptOptions),
+
+    #[options(help = "encrypt assetbundle")]
+    Encrypt(EncryptOptions),
+
+    #[options(help = "generate assetbundle from modpack")]
+    GenAssetBundle(GenAssetBundle),
+}
+
+#[derive(Debug, Options)]
+struct DecryptOptions {
+    #[options(help = "file to decrypt", required)]
+    encrypted_path: PathBuf,
+
+    #[options(help = "output file", required)]
+    output: PathBuf,
+}
+
+#[derive(Debug, Options)]
+struct EncryptOptions {
+    #[options(help = "file to encrypt", required)]
+    decrypted_path: PathBuf,
+
+    #[options(help = "output file", required)]
+    output: PathBuf,
+}
+
+#[derive(Debug, Options)]
+struct GenAssetBundle {
+    #[options(help = "path to assetbundle", required)]
+    assetbundle_path: PathBuf,
+
+    #[options(help = "output file", required)]
+    output: PathBuf,
 }
 
 #[tokio::main]
@@ -131,6 +172,77 @@ async fn main() {
     }));
 
     info!("{}", "ハローセカイ!".green());
+
+    if let Some(Command::Decrypt(ref decrypt_options)) = opts.command {
+        info!(
+            "Decrypting assetbundle {} into {}",
+            decrypt_options.encrypted_path.display(),
+            decrypt_options.output.display()
+        );
+        info!(
+            "All credit for reverse engineering assetbundle encryption goes to https://github.com/mos9527"
+        );
+
+        match decrypt(&decrypt_options.encrypted_path, &decrypt_options.output) {
+            Ok(_) => {
+                info!("Output saved to {}", decrypt_options.output.display())
+            }
+            Err(e) => {
+                error!(
+                    "Could not decrypt {}: {}",
+                    decrypt_options.encrypted_path.display(),
+                    e
+                )
+            }
+        };
+        return;
+    } else if let Some(Command::Encrypt(ref encrypt_options)) = opts.command {
+        info!(
+            "Encrypting assetbundle {} into {}",
+            encrypt_options.decrypted_path.display(),
+            encrypt_options.output.display()
+        );
+        info!(
+            "All credit for reverse engineering assetbundle encryption goes to https://github.com/mos9527"
+        );
+
+        match encrypt(&encrypt_options.decrypted_path, &encrypt_options.output) {
+            Ok(_) => {
+                info!("Output saved to {}", encrypt_options.output.display())
+            }
+            Err(e) => {
+                error!(
+                    "Could not decrypt {}: {}",
+                    encrypt_options.decrypted_path.display(),
+                    e
+                )
+            }
+        };
+        return;
+    } else if let Some(Command::GenAssetBundle(ref options)) = opts.command {
+        info!(
+            "Converting {} into an assetbundle!",
+            options.assetbundle_path.display()
+        );
+
+        let modpack_data = fs::read_to_string(&options.assetbundle_path).unwrap_or_else(|_| {
+            panic!(
+                "Could not read {}! Please try redownloading mods and fixing permissions.",
+                options.assetbundle_path.display()
+            )
+        });
+
+        let mod_data: ModData = toml::from_str(&modpack_data).unwrap_or_else(|_| {
+            panic!(
+                "{} is not formatted properly! Check if MikuMikuLoader is out of date.",
+                options.assetbundle_path.display()
+            )
+        });
+
+        create_assetbundle(mod_data).unwrap();
+
+        return;
+    }
 
     let config_path = match opts.config {
         Some(config) => config,
@@ -213,7 +325,7 @@ async fn main() {
 
     // We build the manager here so that it can be reused in other routes.
 
-    let injection_hashmap = load_injection_map(&injector_config_holder.resource_config);
+    let injection_hashmap = load_injection_map(&injector_config_holder);
 
     // Create a client to handle making HTTPS requests
     let https = HttpsConnectorBuilder::new()
@@ -265,8 +377,6 @@ async fn main() {
     let webui_addr = SocketAddr::from(([0, 0, 0, 0], 3939));
     let webui_server = axum_server::bind(webui_addr).serve(webui_app.into_make_service());
 
-    notify_mml("MikuMikuLoader running at http://0.0.0.0:3939");
-
     match update_assets(config_holder.advanced.assets).await {
         Ok(_) => {}
         Err(e) => error!("Could not update assets: {e}\n"),
@@ -284,6 +394,8 @@ async fn main() {
             notify_mml(&message);
         }
     }
+
+    notify_mml("MikuMikuLoader running at http://0.0.0.0:3939");
 
     if sekai_injector_enabled {
         let backend_task = task::spawn(sekai_injector_serve(Arc::clone(&manager)));
@@ -377,7 +489,7 @@ pub fn update_injection_appversion(
             )
         });
 
-        let prefix = format!("/{}/{}", versions.app_version, versions.app_hash);
+        let prefix = format!("/{}/{}", versions.data_version, versions.asset_hash);
         debug!("Setting prefix to {prefix}");
 
         injector_config.resource_prefix = Some(prefix);
