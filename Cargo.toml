@@ -16,7 +16,7 @@ axum-server = "0.7.2"
 tower-http = { version = "0.6.5", features = ["fs"] }
 hyper-rustls = "0.27.5"
 hyper-util = "0.1.11"
-serde_json = "1.0.140"
+serde_json = "1.0.142"
 local-ip-address = "0.6.5"
 gumdrop = "0.8.1"
 notify-rust = "4.11.7"
@@ -35,7 +35,7 @@ pyo3 = { version = "0.25.0", features = ["auto-initialize"] }
 
 [build-dependencies]
 serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.140"
+serde_json = "1.0.142"
 
 [lints.rust]
 unsafe_code = "forbid"
