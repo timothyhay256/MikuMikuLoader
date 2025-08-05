@@ -2973,7 +2973,7 @@ dependencies = [
 [[package]]
 name = "simple-dns-server"
 version = "0.1.0"
-source = "git+https://github.com/timothyhay256/simple-dns#bbdc8b9cb0d109ea9c1dec8d438e6c8962b93cca"
+source = "git+https://github.com/timothyhay256/simple-dns#2b01c98b5d75a8ee0549b458c491e80e4ab6f4a5"
 dependencies = [
  "futures",
  "serde",
