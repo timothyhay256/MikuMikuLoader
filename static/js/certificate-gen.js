@@ -53,8 +53,11 @@ document.getElementById("certButton").addEventListener("click", function (event)
     const certLifetime = document.getElementById("certlifetime").value;
     const caNameInput = document.getElementById("canameinput").value;
     const caKeyInput = document.getElementById("cakeyinput").value;
-    const certName = document.getElementById("certname").value;
-    const certKeyName = document.getElementById("certkeyname").value;
+    const abCertName = document.getElementById("abcertname").value;
+    const abCertKeyName = document.getElementById("abcertkeyname").value;
+
+    const abInfoCertName = document.getElementById("abinfocertname").value;
+    const abInfoCertKeyName = document.getElementById("abinfocertkeyname").value;
 
     fetch("/generate-cert", {
         method: "POST",
@@ -67,8 +70,37 @@ document.getElementById("certButton").addEventListener("click", function (event)
             cert_lifetime: parseInt(certLifetime),
             ca_name_input: caNameInput,
             ca_key_input: caKeyInput,
-            cert_name: certName,
-            cert_key_name: certKeyName
+            cert_name: abCertName,
+            cert_key_name: abCertKeyName
+        })
+    })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error("Network response was not ok");
+            }
+            return response.json();
+        })
+        .then(data => {
+            alert(data);
+        })
+        .catch(error => {
+            console.error("Error:", error);
+            alert("There was an error generating the certificate.");
+        });
+
+    fetch("/generate-cert", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            hostname: hostname,
+            ip: ip,
+            cert_lifetime: parseInt(certLifetime),
+            ca_name_input: caNameInput,
+            ca_key_input: caKeyInput,
+            cert_name: abInfoCertName,
+            cert_key_name: abInfoCertKeyName
         })
     })
         .then(response => {

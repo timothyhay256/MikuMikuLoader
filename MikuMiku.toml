@@ -1,7 +1,11 @@
-# Do not edit this unless you know what you are doing!
+platform = "android"
+region = "en"
 
+# Do not edit beneath this unless you know what you are doing!
 [advanced]
 sekai_injector_config_path = "sekai-injector.toml"
+assetbundle_url = "assetbundle.sekai-en.com"
+assetbundle_info_url = "assetbundle-info.sekai-en.com"
 
 [advanced.assets]
 asset_path = "assets"

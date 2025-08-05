@@ -1,15 +1,19 @@
 use std::collections::HashMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Default)]
 pub struct Config {
     pub advanced: AdvancedConfig,
+    pub platform: String,
+    pub region: String,
 }
 
 #[derive(Deserialize)]
 pub struct AdvancedConfig {
     pub sekai_injector_config_path: String,
+    pub assetbundle_url: String,
+    pub assetbundle_info_url: String,
     pub assets: AssetConfig,
 }
 
@@ -17,13 +21,16 @@ impl Default for AdvancedConfig {
     fn default() -> Self {
         AdvancedConfig {
             sekai_injector_config_path: "sekai-injector.toml".to_string(),
+            assetbundle_url: "assetbundle.sekai-en.com".to_string(),
+            assetbundle_info_url: "assetbundle-info.sekai-en.com".to_string(),
             assets: AssetConfig::default(),
         }
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct AssetConfig {
+    pub asset_path: String,
     pub common_asset_url: String,
     pub template_asset_url: String,
     pub live2d_asset_url: String,
@@ -35,6 +42,7 @@ pub struct AssetConfig {
 impl Default for AssetConfig {
     fn default() -> Self {
         AssetConfig {
+            asset_path: "assets".to_string(),
             common_asset_url:
                 "raw.githubusercontent.com/Sekai-World/sekai-master-db-diff/refs/heads/main"
                     .to_string(),
@@ -113,4 +121,26 @@ pub fn build_character_map() -> HashMap<String, &'static str> {
     map.insert("kaito".to_string(), "26_kaito");
 
     map
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ABInfoRoot {
+    pub version: String,
+    pub os: String,
+    pub bundles: HashMap<String, ABInfoBundle>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ABInfoBundle {
+    pub bundle_name: String,
+    pub cache_file_name: String,
+    pub cache_directory_name: String,
+    pub hash: String,
+    pub category: String,
+    pub crc: u32,
+    pub file_size: u32,
+    pub dependencies: Vec<String>,
+    pub paths: Vec<String>,
+    pub is_builtin: bool,
 }

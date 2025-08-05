@@ -1,3 +1,4 @@
+mod assetbundle;
 mod mods;
 mod routes;
 mod scenario;
@@ -15,6 +16,7 @@ use std::{
     sync::Arc,
 };
 
+use anyhow::Result;
 use axum::{
     Router,
     body::Body,
@@ -31,15 +33,18 @@ use log::{debug, error, info, warn};
 use notify_rust::Notification;
 use routes::static_handler;
 use rust_embed::Embed;
-use sekai_injector::{Config, Manager, ServerStatistics, load_injection_map, serve};
+use sekai_injector::{Config, Manager, ServerStatistics, load_injection_maps, serve};
 use serde::Deserialize;
 use simple_dns_server::{Config as DConfig, RecordInfo, RecordType, SimpleDns};
 use tokio::{sync::RwLock, task};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
-use utils::AssetConfig;
+use utils::{AssetConfig, Config as MMLConfig};
 
-use crate::mods::{ModData, create_assetbundle};
+use crate::{
+    assetbundle::{decrypt_aes_cbc, encrypt_aes_cbc, get_apimanager_keys, reload_assetbundle_info},
+    mods::{ModData, create_assetbundle},
+};
 
 #[derive(Debug, Options)]
 struct CommandOptions {
@@ -71,13 +76,22 @@ struct Versions {
 #[derive(Debug, Options)]
 enum Command {
     #[options(help = "decrypt assetbundle")]
-    Decrypt(DecryptOptions),
+    AbDecrypt(DecryptOptions),
 
     #[options(help = "encrypt assetbundle")]
-    Encrypt(EncryptOptions),
+    AbEncrypt(EncryptOptions),
+
+    #[options(help = "decrypt assetbundle info")]
+    AbInfoDecrypt(DecryptOptions),
+
+    #[options(help = "encrypt assetbundle info")]
+    AbInfoEncrypt(EncryptOptions),
 
     #[options(help = "generate assetbundle from modpack")]
     GenAssetBundle(GenAssetBundle),
+
+    #[options(help = "reload assetbundle info cache to force asset reloading in game")]
+    ReloadAbInfo(ReloadAbInfo),
 }
 
 #[derive(Debug, Options)]
@@ -106,6 +120,9 @@ struct GenAssetBundle {
     #[options(help = "output file", required)]
     output: PathBuf,
 }
+
+#[derive(Debug, Options)]
+struct ReloadAbInfo {}
 
 #[tokio::main]
 async fn main() {
@@ -171,9 +188,28 @@ async fn main() {
         }
     }));
 
+    let config_path = match opts.config {
+        Some(config) => config,
+        None => "MikuMiku.toml".to_string(),
+    };
+
+    let mut config_file_contents = String::new();
+
+    let config_holder: utils::Config = match File::open(config_path) {
+        Ok(mut file) => {
+            file.read_to_string(&mut config_file_contents).expect("The config file contains non UTF-8 characters, what in the world did you put in it??");
+            toml::from_str(&config_file_contents)
+                .expect("The config file was not formatted properly and could not be read.")
+        }
+        Err(_) => {
+            warn!("No MikuMikuLoader config found, using defaults!");
+            utils::Config::default()
+        }
+    };
+
     info!("{}", "ハローセカイ!".green());
 
-    if let Some(Command::Decrypt(ref decrypt_options)) = opts.command {
+    if let Some(Command::AbDecrypt(ref decrypt_options)) = opts.command {
         info!(
             "Decrypting assetbundle {} into {}",
             decrypt_options.encrypted_path.display(),
@@ -196,7 +232,7 @@ async fn main() {
             }
         };
         return;
-    } else if let Some(Command::Encrypt(ref encrypt_options)) = opts.command {
+    } else if let Some(Command::AbEncrypt(ref encrypt_options)) = opts.command {
         info!(
             "Encrypting assetbundle {} into {}",
             encrypt_options.decrypted_path.display(),
@@ -218,6 +254,88 @@ async fn main() {
                 )
             }
         };
+        return;
+    } else if let Some(Command::AbInfoDecrypt(ref decrypt_options)) = opts.command {
+        info!(
+            "Encrypting assetbundle {} into {}",
+            decrypt_options.encrypted_path.display(),
+            decrypt_options.output.display()
+        );
+
+        let mut input_file =
+            File::open(&decrypt_options.encrypted_path).expect("Could not read input file.");
+
+        let mut output_file =
+            File::create(&decrypt_options.output).expect("Could not open output file for writing.");
+
+        let mut byte_buffer = Vec::new();
+        input_file
+            .read_to_end(&mut byte_buffer)
+            .expect("Could not read input file.");
+
+        debug!(
+            "attempting decryption with {} region keys",
+            config_holder.region
+        );
+
+        match get_apimanager_keys(&config_holder.region) {
+            Some(keys) => {
+                debug!("Key len: {} IV len: {}", keys.0.len(), keys.1.len());
+                let decrypted = decrypt_aes_cbc(&byte_buffer, keys.0, keys.1).unwrap();
+
+                output_file
+                    .write_all(&decrypted)
+                    .expect("Could not write to output file.");
+            }
+            None => {
+                error!(
+                    "No valid decryption keys found for region {}",
+                    config_holder.region
+                );
+                std::process::exit(1);
+            }
+        }
+        return;
+    } else if let Some(Command::AbInfoEncrypt(ref encrypt_options)) = opts.command {
+        info!(
+            "Encrypting assetbundle {} into {}",
+            encrypt_options.decrypted_path.display(),
+            encrypt_options.output.display()
+        );
+
+        let mut input_file =
+            File::open(&encrypt_options.decrypted_path).expect("Could not read input file.");
+
+        let mut output_file =
+            File::create(&encrypt_options.output).expect("Could not open output file for writing.");
+
+        let mut byte_buffer = Vec::new();
+        input_file
+            .read_to_end(&mut byte_buffer)
+            .expect("Could not read input file.");
+
+        debug!(
+            "attempting encryption with {} region keys",
+            config_holder.region
+        );
+
+        match get_apimanager_keys(&config_holder.region) {
+            Some(keys) => {
+                info!("Key len: {} IV len: {}", keys.0.len(), keys.1.len());
+                let encrypted = encrypt_aes_cbc(&byte_buffer, keys.0, keys.1).unwrap();
+
+                output_file
+                    .write_all(&encrypted)
+                    .expect("Could not write to output file.");
+            }
+            None => {
+                error!(
+                    "No valid decryption keys found for region {}",
+                    config_holder.region
+                );
+                std::process::exit(1);
+            }
+        }
         return;
     } else if let Some(Command::GenAssetBundle(ref options)) = opts.command {
         info!(
@@ -244,30 +362,12 @@ async fn main() {
         return;
     }
 
-    let config_path = match opts.config {
-        Some(config) => config,
-        None => "MikuMiku.toml".to_string(),
-    };
-
-    let mut config_file_contents = String::new();
-
-    let config_holder: utils::Config = match File::open(config_path) {
-        Ok(mut file) => {
-            file.read_to_string(&mut config_file_contents).expect("The config file contains non UTF-8 characters, what in the world did you put in it??");
-            toml::from_str(&config_file_contents)
-                .expect("The config file was not formatted properly and could not be read.")
-        }
-        Err(_) => {
-            warn!("No MikuMikuLoader config found, using defaults!");
-            utils::Config::default()
-        }
-    };
-
     let injector_config_path = Path::new(&config_holder.advanced.sekai_injector_config_path);
 
     let mut injector_file_contents = String::new();
 
-    let injector_config_holder: sekai_injector::Config = match File::open(injector_config_path) {
+    let mut injector_config_holder: sekai_injector::Config = match File::open(injector_config_path)
+    {
         Ok(mut file) => {
             file.read_to_string(&mut injector_file_contents)
         .expect(
@@ -282,14 +382,44 @@ async fn main() {
         }
     };
 
-    let injector_config_holder = update_injection_appversion(injector_config_holder); // Read versions.json and update resource_prefix if it is necessary.
+    // Read versions.json and update resource_prefix if it is necessary.
+    let (_, data_version, asset_version) = match update_injection_appversion(
+        &mut injector_config_holder,
+        &config_holder,
+    ) {
+        Ok(version) => version,
+        Err(e) => {
+            let msg = &format!(
+                "Could not update appversion and apphash prefix for assetbundle domain. It is likely injection will never trigger. Err: {e}"
+            );
+            error!("{msg}");
+            notify_mml(msg);
+            (String::from(""), String::from(""), String::from(""))
+        }
+    };
+
+    // Now that we have the asset version we can check if the user wants to reload the abinfo
+    if let Some(Command::ReloadAbInfo(ref _options)) = opts.command {
+        info!(
+            "Reloading assetbundle info hashes! This may trigger multiple redownloads within the game."
+        );
+
+        reload_assetbundle_info(config_holder, asset_version)
+            .await
+            .expect("aaah");
+        return;
+    }
+
+    match update_assets(&config_holder, data_version).await {
+        Ok(_) => {}
+        Err(e) => error!("Could not update assets: {e}\n"),
+    };
 
     let mut sekai_injector_enabled = true;
 
-    for path in [
-        &injector_config_holder.server_cert,
-        &injector_config_holder.server_key,
-    ] {
+    let domain_info = injector_config_holder.extract_domain_info();
+
+    for path in domain_info.1.iter().chain(domain_info.2.iter()) {
         if !Path::new(path).exists() {
             let message = format!(
                 "{path} does not exist! Sekai-injector won't start yet. Once you have generated the certificates, restart the program."
@@ -325,7 +455,7 @@ async fn main() {
 
     // We build the manager here so that it can be reused in other routes.
 
-    let injection_hashmap = load_injection_map(&injector_config_holder);
+    let injection_hashmap = load_injection_maps(&injector_config_holder);
 
     // Create a client to handle making HTTPS requests
     let https = HttpsConnectorBuilder::new()
@@ -376,11 +506,6 @@ async fn main() {
 
     let webui_addr = SocketAddr::from(([0, 0, 0, 0], 3939));
     let webui_server = axum_server::bind(webui_addr).serve(webui_app.into_make_service());
-
-    match update_assets(config_holder.advanced.assets).await {
-        Ok(_) => {}
-        Err(e) => error!("Could not update assets: {e}\n"),
-    };
 
     #[cfg(not(debug_assertions))]
     // Don't open browser in debug mode, because that would be really annoying.
@@ -462,58 +587,105 @@ pub fn configure_dns(config: &Config) -> DConfig {
     };
 
     let mut domains = BTreeMap::new();
-    domains.insert(config.upstream_host.clone(), vec![record_info]);
+
+    for domain in config.domains.clone() {
+        domains.insert(domain.address, vec![record_info.clone()]);
+    }
 
     let conf = DConfig { bind, domains };
     info!("DNS server config: {conf:?}");
     conf
 }
 
+/// Sets the injection prefix in `sekai_injector::Config` based on `MMLConfig`.
+///
+/// Returns a tuple `(apphash, data version, asset version)`.
 pub fn update_injection_appversion(
-    injector_config: sekai_injector::Config,
-) -> sekai_injector::Config {
-    if injector_config.resource_prefix.is_some() {
-        warn!("Prefix is manually set, will not override with up-to-date apphash and version!");
-        injector_config
+    injector_config: &mut sekai_injector::Config,
+    mml_config: &MMLConfig,
+) -> Result<(String, String, String)> {
+    let versions_path = format!("{}/versions.json", mml_config.advanced.assets.asset_path);
+    let version_file = fs::File::open(versions_path)?;
+
+    let versions: Versions = serde_json::from_reader(version_file)?;
+
+    if let Some(assetbundle_domain) = injector_config
+        .domains
+        .iter_mut()
+        .find(|x| x.address == mml_config.advanced.assetbundle_url)
+    {
+        if assetbundle_domain.resource_prefix.is_some() {
+            warn!("Prefix is manually set, will not override with up-to-date apphash and version!");
+        } else {
+            let prefix = format!("/{}/{}", versions.data_version, versions.asset_hash);
+            debug!("Setting prefix to {prefix}");
+
+            assetbundle_domain.resource_prefix = Some(prefix);
+        }
     } else {
-        let versions_path = "assets/versions.json";
-        let mut injector_config = injector_config.clone();
-
-        debug!("Trying to read version data from {versions_path}");
-
-        let version_file = fs::File::open(versions_path).unwrap_or_else(|_| panic!("Could not read {}! Please remove the assets folder and try again to redownload assets.", &versions_path));
-
-        let versions: Versions = serde_json::from_reader(version_file).unwrap_or_else(|_| {
-            panic!(
-                "{versions_path} is not formatted properly! Check if MikuMikuLoader is out of date."
-            )
-        });
-
-        let prefix = format!("/{}/{}", versions.data_version, versions.asset_hash);
-        debug!("Setting prefix to {prefix}");
-
-        injector_config.resource_prefix = Some(prefix);
-        injector_config
+        anyhow::bail!(
+            "Could not update required request prefixes, may be unable to succesfully inject resources!"
+        );
     }
+
+    if let Some(assetbundle_info_domain) = injector_config
+        .domains
+        .iter_mut()
+        .find(|x| x.address == mml_config.advanced.assetbundle_info_url)
+    {
+        if assetbundle_info_domain.resource_prefix.is_some() {
+            warn!("Prefix is manually set, will not override with up-to-date asset version!");
+        } else {
+            let prefix = format!(
+                "/api/version/{}/os/{}",
+                versions.asset_version, mml_config.platform
+            );
+            debug!("Setting prefix to {prefix}");
+
+            assetbundle_info_domain.resource_prefix = Some(prefix);
+        }
+    } else {
+        anyhow::bail!(
+            "Could not update required request prefixes, may be unable to succesfully inject resources!"
+        );
+    }
+
+    Ok((
+        versions.app_hash,
+        versions.data_version,
+        versions.asset_version,
+    ))
 }
 
-pub async fn update_assets(asset_config: AssetConfig) -> Result<(), Box<dyn Error>> {
+pub async fn update_assets(
+    config: &MMLConfig,
+    asset_version: String,
+) -> Result<(), Box<dyn Error>> {
     // TODO: Implement retries
+    let asset_config = &config.advanced.assets;
+
+    let abinfo_url = vec![format!(
+        "api/version/{}/os/{}",
+        asset_version, config.platform
+    )];
+
     notify_mml("Checking assets for updates...");
 
     let client = reqwest::Client::new();
     let mut tasks = FuturesUnordered::<Pin<Box<dyn Future<Output = String>>>>::new();
 
     for (list, base_url) in [
-        asset_config.needed_asset_files,
-        asset_config.needed_template_files,
-        asset_config.needed_live2d_files,
+        &asset_config.needed_asset_files,
+        &asset_config.needed_template_files,
+        &asset_config.needed_live2d_files,
+        &abinfo_url,
     ]
     .iter()
     .zip([
-        asset_config.common_asset_url,
-        asset_config.template_asset_url,
-        asset_config.live2d_asset_url,
+        &asset_config.common_asset_url,
+        &asset_config.template_asset_url,
+        &asset_config.live2d_asset_url,
+        &config.advanced.assetbundle_info_url,
     ]) {
         let list = list.clone();
 
@@ -538,10 +710,10 @@ pub async fn update_assets(asset_config: AssetConfig) -> Result<(), Box<dyn Erro
                 debug!("{} ETag: {}", asset, etag.to_str().unwrap());
                 new_etag_val = Some(etag.to_str().unwrap());
             } else {
-                warn!("Upstream server doesn't support etag, redownloading assets!");
+                warn!("Upstream server doesn't support etag, redownloading asset! Provided headers: {:?}", resp.headers());
             }
 
-            let existing_etag_path = format!("assets/{asset}.etag");
+            let existing_etag_path = format!("{}/{asset}.etag", asset_config.asset_path);
             let existing_etag_path = Path::new(&existing_etag_path);
             let mut etag_needs_update = true;
 
@@ -575,16 +747,16 @@ pub async fn update_assets(asset_config: AssetConfig) -> Result<(), Box<dyn Erro
                     None => "",
                 };
 
-                match create_dir_all(format!("assets/{asset_dir}")) {
+                match create_dir_all(format!("{}/{asset_dir}", asset_config.asset_path)) {
                     Ok(_) => {}
                     Err(e) => {
                         error!(
-                            "Cannot create assets/{asset_dir}: {e}. Trying to download anyway..."
+                            "Cannot create {}/{asset_dir}: {e}. Trying to download anyway...", asset_config.asset_path
                         )
                     }
                 }
 
-                let mut file = std::fs::File::create(format!("assets/{asset}")).expect("Failed to write asset to file");
+                let mut file = std::fs::File::create(format!("{}/{asset}", asset_config.asset_path)).expect("Failed to write asset to file");
                 let mut content = Cursor::new(resp.bytes().await.unwrap());
                 std::io::copy(&mut content, &mut file).expect("Failed to write asset to file");
             }
@@ -593,17 +765,17 @@ pub async fn update_assets(asset_config: AssetConfig) -> Result<(), Box<dyn Erro
                 // Update etag
                 debug!("Storing etag for {asset}");
 
-                match File::create(format!("assets/{asset}.etag")) {
+                match File::create(format!("{}/{asset}.etag", asset_config.asset_path)) {
                     Ok(mut etag_file) => match write!(etag_file, "{}", new_etag_val.unwrap()) {
                         Ok(_) => {}
                         Err(e) => {
                             error!(
-                                "Failed to write assets/{asset}.etag! Asset will always be redownloaded. Err: {e}"
+                                "Failed to write {}/{asset}.etag! Asset will always be redownloaded. Err: {e}", asset_config.asset_path
                             )
                         }
                     },
                     Err(e) => error!(
-                        "Failed to write assets/{asset}.etag! Asset will always be redownloaded. Err: {e}"
+                        "Failed to write {}/{asset}.etag! Asset will always be redownloaded. Err: {e}", asset_config.asset_path
                     ),
                 }
             }

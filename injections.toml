@@ -1,7 +1,0 @@
-map = [
-    [
-        "/android/event_story/event_whip_2024/scenario",
-        "injections/whip-2024-scenario-override-encrypted",
-        true,
-    ],
-]

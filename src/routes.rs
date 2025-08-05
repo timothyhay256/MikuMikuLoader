@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    default, env,
+    env,
     fs::{self, create_dir},
     io::Read,
     path::Path as fPath,
@@ -24,11 +24,11 @@ use walkdir::WalkDir;
 
 use crate::{
     StaticFile,
-    mods::{ModData, ModType, create_assetbundle},
+    mods::{CacheInvalidDuration, InvalidateCacheEntry, ModData, ModType, create_assetbundle},
     notify_mml,
     scenario::{
         CharacterData, CustomStory, ScenarioAdapter, ScenarioAdapterCharacterLayout,
-        ScenarioAdapterTalkData, ScenarioAdapterTalkDataMotion, SekaiStoriesScene,
+        ScenarioAdapterTalkData, ScenarioAdapterTalkDataMotion,
     },
     utils::{self, BuildMotionData},
 };
@@ -297,6 +297,11 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
         mod_name: payload.file_name.replace(".toml", ""),
         enabled: true,
         mod_type: crate::mods::ModType::Story(ScenarioAdapter::default()),
+        // TODO: Change resource_path and duration
+        invalidated_assets: vec![InvalidateCacheEntry {
+            resource_path: "/android/event_story/event_whip_2024/scenario".to_string(),
+            duration: CacheInvalidDuration::PermanentlyInvalid,
+        }],
     };
 
     // Store all characters and their expressions while looping through models to be used later

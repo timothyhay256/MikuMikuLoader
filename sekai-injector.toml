@@ -1,6 +1,14 @@
 inject_resources = true
-resource_config = "injections.toml"
-upstream_host = "assetbundle.sekai-en.com"
 target_ip = "192.168.86.183"
-server_cert = "server_cert.pem"
-server_key = "server_key.pem"
+
+[[domains]]
+resource_config = "injections-ab.toml"
+address = "assetbundle.sekai-en.com"
+server_cert = "server_cert_ab.pem"
+server_key = "server_key_ab.pem"
+
+[[domains]]
+resource_config = "injections-abinfo.toml"
+address = "assetbundle-info.sekai-en.com"
+server_cert = "server_cert_abinfo.pem"
+server_key = "server_key_abinfo.pem"

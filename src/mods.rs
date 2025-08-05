@@ -3,7 +3,7 @@ use std::ffi::CString;
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::scenario::ScenarioAdapter;
+use crate::{scenario::ScenarioAdapter, utils::Config};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum ModType {
@@ -20,9 +20,28 @@ impl ModType {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ModData {
+    /// Name of the mod
     pub mod_name: String,
+    /// Is the mod active? Set by user
     pub enabled: bool,
+    /// Enum containing all possible types of mods
     pub mod_type: ModType,
+    /// Set game resource paths you want to force to be redownloaded here. By default, all injected resources are invalidated initially.
+    pub invalidated_assets: Vec<InvalidateCacheEntry>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub enum CacheInvalidDuration {
+    /// Invalidated on the first mod reload only
+    InitiallyInvalid,
+    /// Invalidated on every mod reload
+    PermanentlyInvalid,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct InvalidateCacheEntry {
+    pub resource_path: String,
+    pub duration: CacheInvalidDuration,
 }
 
 pub fn create_assetbundle(modpack: ModData) -> PyResult<()> {
@@ -44,4 +63,8 @@ pub fn create_assetbundle(modpack: ModData) -> PyResult<()> {
             })
         }),
     }
+}
+
+pub fn reload_mods(config: Config) {
+    todo!()
 }

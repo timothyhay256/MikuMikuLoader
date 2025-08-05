@@ -8,7 +8,7 @@ license = "GPL-3.0-or-later"
 log = "0.4.27"
 serde = "1.0.219"
 toml = "0.8.22"
-sekai_injector = { git = "https://github.com/timothyhay256/Sekai-Injector" }
+sekai_injector = { path = "/home/pretty/projects/ProjectSekai-Repacked/sekai-injector" }
 colored = "3.0.0"
 tokio = "1.45.0"
 axum = "0.8.4"
@@ -32,6 +32,13 @@ futures = "0.3.31"
 walkdir = "2.5.0"
 simple-dns-server = { git = "https://github.com/timothyhay256/simple-dns" }
 pyo3 = { version = "0.25.0", features = ["auto-initialize"] }
+axum-extra = "0.10.1"
+anyhow = "1.0.98"
+rmp-serde = "1.3.0"
+aes = "0.8.4"
+cbc = "0.1.2"
+block-padding = "0.3.3"
+chrono = "0.4.41"
 
 [build-dependencies]
 serde = { version = "1.0.219", features = ["derive"] }
