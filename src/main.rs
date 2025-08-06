@@ -257,7 +257,7 @@ async fn main() {
         return;
     } else if let Some(Command::AbInfoDecrypt(ref decrypt_options)) = opts.command {
         info!(
-            "Encrypting assetbundle {} into {}",
+            "Decrypting assetbundle info {} into {}",
             decrypt_options.encrypted_path.display(),
             decrypt_options.output.display()
         );

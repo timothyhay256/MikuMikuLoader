@@ -7,6 +7,7 @@ use block_padding::{Padding, Pkcs7};
 use cbc::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use chrono::{Datelike, Local, Timelike};
 use log::{debug, error, info, warn};
+use rand::Rng;
 use serde::Serialize;
 use tokio::{
     fs::File,
@@ -117,13 +118,21 @@ pub async fn reload_assetbundle_info(config: &Config, asset_version: &String) ->
                                         now.timestamp_subsec_millis()
                                     );
 
-                                    info!("{formatted}");
+                                    debug!("{formatted}");
                                     bundle.hash = format!("FakePlaceholderHash{formatted}");
                                     bundle.category = "StartApp".to_string(); // Force redownload on app start (I think)
+                                    bundle.paths[0] =
+                                        bundle.paths[0].replace("OnDemand", "StartApp"); // Download this asset on game startup
+                                    bundle.crc = rand::rng().random_range(500..10000); // Needed to actually force the game to redownload for some reason
+                                    bundle.file_size = rand::rng().random_range(500..10000);
                                 }
                                 CacheInvalidDuration::InitiallyInvalid => {
                                     bundle.hash = "FakePlaceholderHash0000000000000".to_string(); // TODO: Track if this asset has already been injected
                                     bundle.category = "StartApp".to_string();
+                                    bundle.paths[0] =
+                                        bundle.paths[0].replace("OnDemand", "StartApp");
+                                    bundle.crc = rand::rng().random_range(500..10000); // Needed to actually force the game to redownload for some reason
+                                    bundle.file_size = rand::rng().random_range(500..10000);
                                 }
                             },
                             None => warn!(
@@ -153,6 +162,8 @@ pub async fn reload_assetbundle_info(config: &Config, asset_version: &String) ->
     ))
     .await?;
     assetbundle_info.write_all(&encrypted_abinfo).await?;
+
+    assetbundle_info.flush().await?;
 
     Ok(())
 }
