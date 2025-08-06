@@ -140,7 +140,9 @@ pub struct ABInfoBundle {
     pub category: String,
     pub crc: u32,
     pub file_size: u32,
+    #[serde(default)]
     pub dependencies: Vec<String>,
+    #[serde(default)]
     pub paths: Vec<String>,
     pub is_builtin: bool,
 }

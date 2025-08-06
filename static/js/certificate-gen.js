@@ -48,7 +48,8 @@ document.getElementById("caButton").addEventListener("click", function (event) {
 document.getElementById("certButton").addEventListener("click", function (event) {
     event.preventDefault();
 
-    const hostname = document.getElementById("hostname").value;
+    const hostname_ab = document.getElementById("hostname-ab").value;
+    const hostname_abinfo = document.getElementById("hostname-abinfo").value;
     const ip = document.getElementById("ip").value;
     const certLifetime = document.getElementById("certlifetime").value;
     const caNameInput = document.getElementById("canameinput").value;
@@ -65,7 +66,7 @@ document.getElementById("certButton").addEventListener("click", function (event)
             "Content-Type": "application/json"
         },
         body: JSON.stringify({
-            hostname: hostname,
+            hostname: hostname_ab,
             ip: ip,
             cert_lifetime: parseInt(certLifetime),
             ca_name_input: caNameInput,
@@ -94,7 +95,7 @@ document.getElementById("certButton").addEventListener("click", function (event)
             "Content-Type": "application/json"
         },
         body: JSON.stringify({
-            hostname: hostname,
+            hostname: hostname_abinfo,
             ip: ip,
             cert_lifetime: parseInt(certLifetime),
             ca_name_input: caNameInput,

@@ -2,11 +2,12 @@ use std::path::Path;
 
 // Credit for reverse engineering and decryption method of assetbundle info goes to https://github.com/mos9527/sssekai
 use aes::Aes128;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use block_padding::{Padding, Pkcs7};
 use cbc::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use chrono::{Datelike, Local, Timelike};
-use log::{debug, error, warn};
+use log::{debug, error, info, warn};
+use serde::Serialize;
 use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncWriteExt},
@@ -57,17 +58,22 @@ pub fn decrypt_aes_cbc(encrypted: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8
 /// in case of permanently invalid hash and
 /// FakePlaceholderHash0000000000000
 /// as the "new" hash
-pub async fn reload_assetbundle_info(config: Config, asset_version: String) -> Result<()> {
+pub async fn reload_assetbundle_info(config: &Config, asset_version: &String) -> Result<()> {
     let mod_path = Path::new("mods");
 
-    let mut assetbundle_info = File::open(&format!(
+    let assetbundle_info_path = &format!(
         "{}/api/version/{}/os/{}",
         config.advanced.assets.asset_path, asset_version, config.platform
-    ))
-    .await?;
+    );
+
+    debug!("reading {assetbundle_info_path}");
+    let mut assetbundle_info = File::open(assetbundle_info_path).await?;
 
     let mut byte_buffer = Vec::new();
-    assetbundle_info.read_to_end(&mut byte_buffer).await?;
+    assetbundle_info
+        .read_to_end(&mut byte_buffer)
+        .await
+        .context("Reading assetbundle info file")?;
 
     let key = get_apimanager_keys(&config.region).unwrap();
     let decrypted_abinfo = decrypt_aes_cbc(&byte_buffer, key.0, key.1)?;
@@ -111,10 +117,13 @@ pub async fn reload_assetbundle_info(config: Config, asset_version: String) -> R
                                         now.timestamp_subsec_millis()
                                     );
 
+                                    info!("{formatted}");
                                     bundle.hash = format!("FakePlaceholderHash{formatted}");
+                                    bundle.category = "StartApp".to_string(); // Force redownload on app start (I think)
                                 }
                                 CacheInvalidDuration::InitiallyInvalid => {
                                     bundle.hash = "FakePlaceholderHash0000000000000".to_string(); // TODO: Track if this asset has already been injected
+                                    bundle.category = "StartApp".to_string();
                                 }
                             },
                             None => warn!(
@@ -131,9 +140,11 @@ pub async fn reload_assetbundle_info(config: Config, asset_version: String) -> R
         }
     }
 
-    let abinfo_string = rmp_serde::to_vec(&abinfo)?;
+    let mut buf = Vec::new();
+    let mut se = rmp_serde::encode::Serializer::new(&mut buf).with_struct_map();
+    abinfo.serialize(&mut se)?;
 
-    let encrypted_abinfo = encrypt_aes_cbc(&abinfo_string, key.0, key.1)?;
+    let encrypted_abinfo = encrypt_aes_cbc(&buf, key.0, key.1)?;
 
     // Recreate the assetbundle info with newly invalid hashes
     let mut assetbundle_info = File::create(&format!(

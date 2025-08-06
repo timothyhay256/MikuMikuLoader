@@ -39,7 +39,7 @@ use simple_dns_server::{Config as DConfig, RecordInfo, RecordType, SimpleDns};
 use tokio::{sync::RwLock, task};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
-use utils::{AssetConfig, Config as MMLConfig};
+use utils::Config as MMLConfig;
 
 use crate::{
     assetbundle::{decrypt_aes_cbc, encrypt_aes_cbc, get_apimanager_keys, reload_assetbundle_info},
@@ -382,6 +382,41 @@ async fn main() {
         }
     };
 
+    // In the case of the first run, we need to download the versions.json to proceed if it doesn't exist
+    let versions_path = &format!("{}/versions.json", config_holder.advanced.assets.asset_path);
+    let versions_file = Path::new(versions_path);
+
+    if !versions_file.exists() {
+        info!("Downloading versions file.");
+
+        let client = reqwest::Client::new();
+
+        let url = format!(
+            "https://{}/versions.json",
+            config_holder.advanced.assets.common_asset_url
+        );
+
+        debug!("grabbing versions file from {url}");
+        let resp = client.get(url).send().await.unwrap();
+
+        let asset_config = &config_holder.advanced.assets;
+
+        match create_dir_all(asset_config.asset_path.to_string()) {
+            Ok(_) => {}
+            Err(e) => {
+                error!(
+                    "Cannot create {}: {e}. Trying to download anyway...",
+                    asset_config.asset_path
+                )
+            }
+        }
+
+        let mut file = std::fs::File::create(format!("{}/versions.json", asset_config.asset_path))
+            .expect("Failed to write asset to file");
+        let mut content = Cursor::new(resp.bytes().await.unwrap());
+        std::io::copy(&mut content, &mut file).expect("Failed to write asset to file");
+    }
+
     // Read versions.json and update resource_prefix if it is necessary.
     let (_, data_version, asset_version) = match update_injection_appversion(
         &mut injector_config_holder,
@@ -398,22 +433,31 @@ async fn main() {
         }
     };
 
-    // Now that we have the asset version we can check if the user wants to reload the abinfo
+    match update_assets(&config_holder, data_version).await {
+        Ok(_) => {}
+        Err(e) => error!("Could not update assets: {e}\n"),
+    };
+
+    // Now that we have the asset version we can check if the user wants to reload the abinfo and exit
     if let Some(Command::ReloadAbInfo(ref _options)) = opts.command {
         info!(
             "Reloading assetbundle info hashes! This may trigger multiple redownloads within the game."
         );
 
-        reload_assetbundle_info(config_holder, asset_version)
+        reload_assetbundle_info(&config_holder, &asset_version)
             .await
-            .expect("aaah");
+            .unwrap();
         return;
     }
 
-    match update_assets(&config_holder, data_version).await {
-        Ok(_) => {}
-        Err(e) => error!("Could not update assets: {e}\n"),
-    };
+    // Reload the assetbundle info cache TODO: Don't reload unless needed
+    info!(
+        "Reloading assetbundle info hashes! This may trigger multiple redownloads within the game."
+    );
+
+    reload_assetbundle_info(&config_holder, &asset_version)
+        .await
+        .unwrap();
 
     let mut sekai_injector_enabled = true;
 
@@ -455,7 +499,32 @@ async fn main() {
 
     // We build the manager here so that it can be reused in other routes.
 
-    let injection_hashmap = load_injection_maps(&injector_config_holder);
+    let mut injection_hashmap = load_injection_maps(&injector_config_holder);
+
+    debug!("injection_hashmap: {injection_hashmap:?}");
+
+    // For assetbundle info domain, set the resource path to contian the correct version and platform
+
+    let assetbundle_info_path = &format!(
+        "/api/version/{}/os/{}",
+        asset_version, config_holder.platform
+    );
+
+    if let Some(inner_map) = injection_hashmap.get_mut(&config_holder.advanced.assetbundle_info_url)
+        && let Some(entry) = inner_map.get_mut(assetbundle_info_path)
+    {
+        let asset_path = format!(
+            "{}{}",
+            config_holder.advanced.assets.asset_path, assetbundle_info_path
+        );
+
+        debug!("Setting asset_path to {asset_path}");
+        entry.0 = asset_path;
+    } else {
+        warn!("Could not assign correct asset path for assetbundle info request path!");
+    }
+
+    debug!("injection_hashmap: {injection_hashmap:?}");
 
     // Create a client to handle making HTTPS requests
     let https = HttpsConnectorBuilder::new()
