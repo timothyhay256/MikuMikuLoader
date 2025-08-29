@@ -14,7 +14,6 @@ use axum::{
 };
 use local_ip_address::local_ip;
 use log::{debug, error, info, warn};
-use regex::Regex;
 use sekai_injector::{
     CertificateGenParams, Manager, RequestParams, generate_ca, new_self_signed_cert,
 };
@@ -31,7 +30,7 @@ use crate::{
         ScenarioSpecialEffect, ScenarioTalkData, TalkCharacter, TalkMotion, create_assetbundle,
         load_ab_typetree,
     },
-    utils::{self, BuildMotionData, Model3Root},
+    utils::{self, Model3Root},
 };
 
 #[derive(Debug, Deserialize)]
@@ -273,14 +272,12 @@ pub async fn gen_ca(Json(payload): Json<CAGenOptions>) -> impl IntoResponse {
 }
 
 pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl IntoResponse {
+    // TODO: Clean up, make more efficient, make this an impl
     // TODO: Apply model transform
     info!("Received story export to modpack request at export_story endpoint: {payload:?}");
 
     let mod_name = payload.file_name.replace(".toml", "");
     let mod_ab_path = &format!("mods/{mod_name}.ab");
-
-    // Compile this ahead of the loop
-    let re_extract_pose = Regex::new(r"motions/([^\s]+)\.motion3\.json").unwrap();
 
     // Load character2ds
     let character2ds_file = fs::File::open("assets/character2ds.json").expect("Could not read assets/character2ds.json! Please remove the assets folder and try again to redownload assets.");
@@ -432,7 +429,7 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
 
                     if let Some(full_id) = char_map.get(&model.character) {
 
-                        // Get pose name from SEKAI-Stories index
+                        // Get pose and expression name from SEKAI-Stories index
                         let character_motions_path =
                             format!("assets/public/live2d/model/{}/{}/{}.model3.json", full_id.replace("_", ""), model.model_name, model.model_name);
 
@@ -443,32 +440,44 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
                         let character_motions: Model3Root = serde_json::from_reader(
                             character_motions_file,
                         ).unwrap();
-                        // .unwrap_or_else(|_| panic!("{character_motions_path} is not formatted properly! Check if MikuMikuLoader is out of date."));
 
-                        let result_pose_file_str = &character_motions.file_references.motions[model.model_pose as usize][0].file;
+                        // Collect just the keys
+                        let mut character_motions: Vec<&String> = character_motions.file_references.motions.keys().collect();
 
-                        let result_pose = match re_extract_pose.captures(result_pose_file_str) {
-                            Some(result_pose) => {
-                                result_pose[1].to_string()
-                            },
-                            None => {warn!("Could not find any matching result_pose inside {result_pose_file_str}, using w-adult-blushed01!");
-                        "w-adult-blushed01".to_string()}
+                        // SEKAI-Stories has a bug(?) where v2_20mizuki_casual has face_sleepy_03, despite not being referanced in any model files for Mizuki, so it has to be inserted.
+                        let missing_motion = &"face_sleepy_03".to_string();
+                        if model.model_name == "v2_20mizuki_casual" {
+                            debug!("Inserting face_sleepy_03 to account for SEKAI-Stories");
+
+                            let insert_index = character_motions.iter().position(|&p| p == "face_sleepy_02").unwrap();
+
+                            character_motions.insert(insert_index + 1, missing_motion);
+                        }
+
+                        // Grabs pose name
+                        let result_pose = match character_motions.get(model.model_pose as usize) {
+                            Some(result_pose) => *result_pose,
+                            None => {
+                                warn!("Could not find any matching result_pose inside {character_motions_path}, using w-adult-blushed01!");
+                                &"w-adult-blushed01".to_string()
+                            }
                         };
 
-                        // Get expression from SEKAI-Stories index from BuildMotionData
-                        let build_motion_data_path =
-                            format!("assets/public/live2d/motion/{}/BuildMotionData.json", full_id.replace("_", ""));
+                        // Get index of first key containing "face_", as this is how SEKAI-Stories does its indexing
 
-                        debug!("Trying to read build motion data from {build_motion_data_path}");
-
-                        let character_build_motion_file = fs::File::open(&build_motion_data_path).unwrap_or_else(|_| panic!("Could not read {}! Please remove the assets folder and try again to redownload assets.", &build_motion_data_path));
-
-                        let character_build_motion: BuildMotionData = serde_json::from_reader(
-                            character_build_motion_file,
-                        )
-                        .unwrap_or_else(|_| panic!("{build_motion_data_path} is not formatted properly! Check if MikuMikuLoader is out of date."));
-
-                        let result_expression = &character_build_motion.expressions[model.model_expression as usize];
+                        let result_expression = match character_motions.iter().position(|k| k.contains("face_")) {
+                            Some(idx) => match character_motions.get(idx + (model.model_expression - 1) as usize) {
+                                Some(result_expression) => *result_expression,
+                                None => {
+                                    warn!("Could not find any matching result_expression inside {character_motions_path}, using face_cry_01!");
+                                    &"face_cry_01".to_string()
+                                }
+                            },
+                            None => {
+                                warn!("{character_motions_path}, contains no face_*! This should never happen, using face_cry_01!");
+                                &"face_cry_01".to_string()
+                            }
+                        };
 
                         let char_data = CharacterData {
                             id: character_id,
