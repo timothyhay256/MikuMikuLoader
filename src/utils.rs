@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Default)]
@@ -84,10 +85,38 @@ impl Default for AssetConfig {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct BuildMotionData {
     pub expressions: Vec<String>,
     pub motions: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MotionEntry {
+    #[serde(rename = "FadeInTime")]
+    fade_in_time: f32,
+
+    #[serde(rename = "FadeOutTime")]
+    fade_out_time: f32,
+
+    #[serde(rename = "File")]
+    pub file: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FileReferences {
+    #[serde(rename = "Moc")]
+    moc: String,
+
+    #[serde(rename = "Motions")]
+    pub motions: IndexMap<String, Vec<MotionEntry>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Model3Root {
+    #[serde(rename = "FileReferences")]
+    pub file_references: FileReferences,
 }
 
 pub fn build_character_map() -> HashMap<String, &'static str> {

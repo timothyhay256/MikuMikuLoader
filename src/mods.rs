@@ -1,13 +1,12 @@
-use std::ffi::CString;
+use std::collections::HashMap;
 
-use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{scenario::ScenarioAdapter, utils::Config};
+use crate::scenario::Scenario;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum ModType {
-    Story(ScenarioAdapter),
+    Story(Scenario),
 }
 
 impl ModType {
@@ -28,6 +27,8 @@ pub struct ModData {
     pub mod_type: ModType,
     /// Set game resource paths you want to force to be redownloaded here. By default, all injected resources are invalidated initially.
     pub invalidated_assets: Vec<InvalidateCacheEntry>,
+    /// HashMap containing all assets to be injected. Key is resource path to override, value is path to local AssetBundle file.
+    pub injected_assets: HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -42,29 +43,4 @@ pub enum CacheInvalidDuration {
 pub struct InvalidateCacheEntry {
     pub resource_path: String,
     pub duration: CacheInvalidDuration,
-}
-
-pub fn create_assetbundle(modpack: ModData) -> PyResult<()> {
-    match modpack.mod_type {
-        ModType::Story(scenario_adapter) => Python::with_gil(|py| {
-            const PY_CODE: &str = include_str!("../python/story_to_assetbundle.py");
-
-            Python::with_gil(|py| {
-                let filename = CString::new("story_to_assetbundle.py").unwrap();
-                let modname = CString::new("story_to_assetbundle").unwrap();
-
-                let module =
-                    PyModule::from_code(py, &CString::new(PY_CODE).unwrap(), &filename, &modname)?;
-
-                let func = module.getattr("list_assets")?;
-                func.call1(("assets/template",))?;
-
-                Ok(())
-            })
-        }),
-    }
-}
-
-pub fn reload_mods(config: Config) {
-    todo!()
 }

@@ -1,0 +1,7 @@
+map = [
+    [
+        "/android/event_story/event_whip_2024/scenario",
+        "mods/SimpleIntro.ab",
+        true,
+    ],
+]

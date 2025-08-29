@@ -7,7 +7,7 @@ mod utils;
 use std::{
     collections::BTreeMap,
     error::Error,
-    fs::{self, File, create_dir_all},
+    fs::{self, File, OpenOptions, create_dir_all},
     io::{Cursor, Read, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     panic,
@@ -43,7 +43,8 @@ use utils::Config as MMLConfig;
 
 use crate::{
     assetbundle::{decrypt_aes_cbc, encrypt_aes_cbc, get_apimanager_keys, reload_assetbundle_info},
-    mods::{ModData, create_assetbundle},
+    mods::ModData,
+    scenario::create_assetbundle,
 };
 
 #[derive(Debug, Options)]
@@ -129,7 +130,7 @@ async fn main() {
     let opts = CommandOptions::parse_args_default_or_exit();
 
     let file_appender = RollingFileAppender::builder()
-        .rotation(Rotation::NEVER)
+        .rotation(Rotation::DAILY)
         .filename_prefix("MikuMikuLoader-log.txt")
         .build("logs")
         .expect("failed to initialize rolling file appender");
@@ -248,7 +249,7 @@ async fn main() {
             }
             Err(e) => {
                 error!(
-                    "Could not decrypt {}: {}",
+                    "Could not encrypt {}: {}",
                     encrypt_options.decrypted_path.display(),
                     e
                 )
@@ -321,7 +322,7 @@ async fn main() {
 
         match get_apimanager_keys(&config_holder.region) {
             Some(keys) => {
-                info!("Key len: {} IV len: {}", keys.0.len(), keys.1.len());
+                debug!("Key len: {} IV len: {}", keys.0.len(), keys.1.len());
                 let encrypted = encrypt_aes_cbc(&byte_buffer, keys.0, keys.1).unwrap();
 
                 output_file
@@ -337,7 +338,7 @@ async fn main() {
             }
         }
         return;
-    } else if let Some(Command::GenAssetBundle(ref options)) = opts.command {
+    } else if let Some(Command::GenAssetBundle(options)) = opts.command {
         info!(
             "Converting {} into an assetbundle!",
             options.assetbundle_path.display()
@@ -357,7 +358,7 @@ async fn main() {
             )
         });
 
-        create_assetbundle(mod_data).unwrap();
+        create_assetbundle(mod_data, Some(options.output), true).unwrap();
 
         return;
     }
@@ -401,7 +402,7 @@ async fn main() {
 
         let asset_config = &config_holder.advanced.assets;
 
-        match create_dir_all(asset_config.asset_path.to_string()) {
+        match create_dir_all(&asset_config.asset_path) {
             Ok(_) => {}
             Err(e) => {
                 error!(
@@ -662,7 +663,7 @@ pub fn configure_dns(config: &Config) -> DConfig {
     }
 
     let conf = DConfig { bind, domains };
-    info!("DNS server config: {conf:?}");
+    debug!("DNS server config: {conf:?}");
     conf
 }
 
@@ -756,7 +757,7 @@ pub async fn update_assets(
         &asset_config.live2d_asset_url,
         &config.advanced.assetbundle_info_url,
     ]) {
-        let list = list.clone();
+        let list = *list;
 
         for asset in list {
             let client = client.clone();
@@ -779,7 +780,7 @@ pub async fn update_assets(
                 debug!("{} ETag: {}", asset, etag.to_str().unwrap());
                 new_etag_val = Some(etag.to_str().unwrap());
             } else {
-                warn!("Upstream server doesn't support etag, redownloading asset! Provided headers: {:?}", resp.headers());
+                warn!("Upstream server doesn't support etag, redownloading asset {url}! Provided headers: {:?}", resp.headers());
             }
 
             let existing_etag_path = format!("{}/{asset}.etag", asset_config.asset_path);
@@ -899,30 +900,32 @@ fn decrypt(infile: &Path, outfile: &Path) -> std::io::Result<()> {
 }
 
 fn encrypt(infile: &Path, outfile: &Path) -> std::io::Result<()> {
-    let mut fin = File::open(infile)?;
-    let mut fout = File::create(outfile)?;
+    let mut data = Vec::new();
+    File::open(infile)?.read_to_end(&mut data)?;
+
+    let mut fout = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(outfile)?;
 
     // Write the magic number
     fout.write_all(&[0x10, 0x00, 0x00, 0x00])?;
 
-    // Encrypt the first 128 bytes (16 blocks of 8 bytes)
-    for _ in (0..128).step_by(8) {
-        let mut block = [0u8; 8];
-        if fin.read_exact(&mut block).is_ok() {
-            (0..5).for_each(|i| {
-                block[i] = !block[i];
-            });
-            fout.write_all(&block)?;
-        } else {
-            break; // File is smaller than 128 bytes
+    // Encrypt first 128 bytes
+    for chunk in data.chunks_mut(8).take(16) {
+        for i in 0..chunk.len().min(5) {
+            chunk[i] = !chunk[i];
         }
+        fout.write_all(chunk)?;
     }
 
-    // Copy the rest of the file as-is
-    let mut buffer = [0u8; 8];
-    while fin.read_exact(&mut buffer).is_ok() {
-        fout.write_all(&buffer)?;
+    // Write the rest unchanged
+    if data.len() > 128 {
+        fout.write_all(&data[128..])?;
     }
+
+    fout.flush().unwrap();
 
     Ok(())
 }

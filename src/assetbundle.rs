@@ -3,10 +3,10 @@ use std::path::Path;
 // Credit for reverse engineering and decryption method of assetbundle info goes to https://github.com/mos9527/sssekai
 use aes::Aes128;
 use anyhow::{Context, Result};
-use block_padding::{Padding, Pkcs7};
+use block_padding::Pkcs7;
 use cbc::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use chrono::{Datelike, Local, Timelike};
-use log::{debug, error, info, warn};
+use log::{debug, error, warn};
 use rand::Rng;
 use serde::Serialize;
 use tokio::{
@@ -110,7 +110,7 @@ pub async fn reload_assetbundle_info(config: &Config, asset_version: &String) ->
                                     let now = Local::now();
 
                                     let formatted = format!(
-                                        "{:04}{:02}{:02}{:02}{:03}",
+                                        "FakePlaceholderHash{:04}{:02}{:02}{:02}{:03}",
                                         now.year(),
                                         now.month(),
                                         now.day(),
@@ -119,7 +119,7 @@ pub async fn reload_assetbundle_info(config: &Config, asset_version: &String) ->
                                     );
 
                                     debug!("{formatted}");
-                                    bundle.hash = format!("FakePlaceholderHash{formatted}");
+                                    bundle.hash = formatted;
                                     bundle.category = "StartApp".to_string(); // Force redownload on app start (I think)
                                     bundle.paths[0] =
                                         bundle.paths[0].replace("OnDemand", "StartApp"); // Download this asset on game startup
@@ -135,10 +135,12 @@ pub async fn reload_assetbundle_info(config: &Config, asset_version: &String) ->
                                     bundle.file_size = rand::rng().random_range(500..10000);
                                 }
                             },
-                            None => warn!(
-                                "No matching ABInfo asset found for asset {}, it's cache will not be invalidated",
-                                asset.resource_path
-                            ),
+                            None => {
+                                warn!(
+                                    "No matching ABInfo asset found for asset {}, it's cache will not be invalidated",
+                                    asset.resource_path
+                                );
+                            }
                         }
                     }
                 }

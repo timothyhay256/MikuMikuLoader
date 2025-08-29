@@ -2,7 +2,6 @@ use std::{
     collections::HashMap,
     env,
     fs::{self, create_dir},
-    io::Read,
     path::Path as fPath,
     sync::Arc,
 };
@@ -14,23 +13,25 @@ use axum::{
     response::IntoResponse,
 };
 use local_ip_address::local_ip;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
+use regex::Regex;
 use sekai_injector::{
     CertificateGenParams, Manager, RequestParams, generate_ca, new_self_signed_cert,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::sync::RwLock;
 use walkdir::WalkDir;
 
 use crate::{
     StaticFile,
-    mods::{CacheInvalidDuration, InvalidateCacheEntry, ModData, ModType, create_assetbundle},
+    mods::{CacheInvalidDuration, InvalidateCacheEntry, ModData, ModType},
     notify_mml,
     scenario::{
-        CharacterData, CustomStory, ScenarioAdapter, ScenarioAdapterCharacterLayout,
-        ScenarioAdapterTalkData, ScenarioAdapterTalkDataMotion,
+        CharacterData, CustomStory, ScenarioCharacterLayout, ScenarioSnippet,
+        ScenarioSpecialEffect, ScenarioTalkData, TalkCharacter, TalkMotion, create_assetbundle,
+        load_ab_typetree,
     },
-    utils::{self, BuildMotionData},
+    utils::{self, BuildMotionData, Model3Root},
 };
 
 #[derive(Debug, Deserialize)]
@@ -52,6 +53,7 @@ pub struct CAGenOptions {
     pub ca_key_name: String,
 }
 
+#[allow(dead_code)] // Not all items will be used, but all are required for deserialization
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Character2DS {
@@ -62,13 +64,6 @@ pub struct Character2DS {
     unit: String,
     is_enabled_flip_display: bool,
     asset_name: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ModList {
-    name: String,
-    enabled: bool,
-    mod_type: ModType,
 }
 
 // TODO: Use SSE and channels
@@ -281,6 +276,12 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
     // TODO: Apply model transform
     info!("Received story export to modpack request at export_story endpoint: {payload:?}");
 
+    let mod_name = payload.file_name.replace(".toml", "");
+    let mod_ab_path = &format!("mods/{mod_name}.ab");
+
+    // Compile this ahead of the loop
+    let re_extract_pose = Regex::new(r"motions/([^\s]+)\.motion3\.json").unwrap();
+
     // Load character2ds
     let character2ds_file = fs::File::open("assets/character2ds.json").expect("Could not read assets/character2ds.json! Please remove the assets folder and try again to redownload assets.");
 
@@ -293,15 +294,23 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
         .filter_map(|c| c.asset_name.clone().map(|name| (name, c)))
         .collect();
 
+    let mut injected_assets = HashMap::new();
+    injected_assets.insert(
+        "event_story/event_whip_2024/scenario".to_string(),
+        mod_ab_path.clone(),
+    );
+
+    // Loads the template typetree which we will then modify
     let mut modpack = ModData {
-        mod_name: payload.file_name.replace(".toml", ""),
+        mod_name: mod_name.clone(),
         enabled: true,
-        mod_type: crate::mods::ModType::Story(ScenarioAdapter::default()),
+        mod_type: crate::mods::ModType::Story(load_ab_typetree().unwrap()),
         // TODO: Change resource_path and duration
         invalidated_assets: vec![InvalidateCacheEntry {
-            resource_path: "/android/event_story/event_whip_2024/scenario".to_string(),
+            resource_path: "event_story/event_whip_2024/scenario".to_string(),
             duration: CacheInvalidDuration::PermanentlyInvalid,
         }],
+        injected_assets,
     };
 
     // Store all characters and their expressions while looping through models to be used later
@@ -311,44 +320,144 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
     let ModType::Story(adapter) = &mut modpack.mod_type;
 
     // Push the first background
-    adapter.first_background = fPath::new(&payload.data[0].data.background.clone().to_string())
+    let bkg_name = fPath::new(&payload.data[0].data.background.clone().to_string())
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_owned();
 
+    debug!("Pushing first background");
+    adapter.firstBackground = bkg_name.clone();
+
+    adapter
+        .needBundleNames
+        .push(format!("scenario/background/{bkg_name}"));
+
+    // Push special effect data with story name and (?) MikuMikuLoader
+    adapter.specialEffectData.push(ScenarioSpecialEffect {
+        effectType: 8,
+        stringVal: "Created with MikuMikuLoader".to_owned(),
+        stringValSub: "".to_owned(),
+        duration: 0.0,
+        intVal: 0,
+    });
+
+    adapter.specialEffectData.push(ScenarioSpecialEffect {
+        effectType: 8,
+        stringVal: mod_name.to_owned(),
+        stringValSub: "".to_owned(),
+        duration: 0.0,
+        intVal: 0,
+    });
+
+    adapter.specialEffectData.push(ScenarioSpecialEffect {
+        effectType: 4,
+        stringVal: "".to_owned(),
+        stringValSub: "".to_owned(),
+        duration: 1.0,
+        intVal: 0,
+    });
+
+    // Push necessary ScenarioSnippet for above special effects
+
+    // "MikuMikuLoader" special effect
+    adapter.snippets.push(ScenarioSnippet {
+        index: 0,
+        action: 6,
+        progressBehavior: 1,
+        referenceIndex: 0,
+        delay: 0.0,
+    });
+
+    // Mod name special effect
+    adapter.snippets.push(ScenarioSnippet {
+        index: 1,
+        action: 6,
+        progressBehavior: 1,
+        referenceIndex: 1,
+        delay: 0.0,
+    });
+
+    // Clear special effects
+    adapter.snippets.push(ScenarioSnippet {
+        index: 2,
+        action: 7,
+        progressBehavior: 1,
+        referenceIndex: 0,
+        delay: 0.0,
+    });
+
+    // Have the character appear TODO: Multiple character support
+    adapter.snippets.push(ScenarioSnippet {
+        index: 3,
+        action: 2,
+        progressBehavior: 1,
+        referenceIndex: 0,
+        delay: 2.0,
+    });
+
     // Loop through all the scenes to push the relevant data
-    for scene in payload.data.iter() {
+    for (index, scene) in payload.data.iter().enumerate() {
+        let initial_scene = { index == 0 };
         // Populate appear_characters, and use the grabbed id to populate talk_data at the same time
         for model in &scene.data.models {
             if model.from == "sekai" {
-                // Keep trying to remove costume name, looping in case there are multiple subsets to the costume until we find a match.
-                // TODO: Why in the world does character2ds include multiple identical entries to characters? What are the differences?
-                let mut asset_prefix = model.model_name.as_str();
-                let character_id = loop {
-                    if let Some(item) = character2ds_map.get(asset_prefix) {
-                        break item.character_id;
-                    }
-
-                    match asset_prefix.rfind('_') {
-                        Some(idx) => asset_prefix = &asset_prefix[..idx],
-                        None => {
-                            error!(
-                                "Could not find a matching Character2DId for {}, using Miku! character2ds_map: {character2ds_map:?}",
-                                model.model_name
-                            );
-                            break 21;
+                // Extract id by extracting model name from costume
+                let asset_prefix = {
+                    if let Some(pos) = model.model_name.rfind('_') {
+                        if model.model_name[..pos].contains('_') {
+                            &model.model_name[..pos]
+                        } else {
+                            // Just one underscore indicates it doesn't have anything to trim
+                            &model.model_name
                         }
+                    } else {
+                        // No underscores
+                        &model.model_name
                     }
                 };
+
+                debug!("getting character_id from prefix: {asset_prefix}");
+
+                let character_id = character2ds_map
+                    .get(asset_prefix)
+                    .expect("missing character")
+                    .id;
+
+                debug!("Setting character_id to {character_id}");
 
                 // Use BuildMotionData to determine the expression and pose, since SEKAI-Stories uses an index in the serialized JSON
                 character_expressions.get_or_insert_with(HashMap::new).insert(model.character.clone(), {
                     let char_map = utils::build_character_map();
 
                     if let Some(full_id) = char_map.get(&model.character) {
+
+                        // Get pose name from SEKAI-Stories index
+                        let character_motions_path =
+                            format!("assets/public/live2d/model/{}/{}/{}.model3.json", full_id.replace("_", ""), model.model_name, model.model_name);
+
+                        debug!("Trying to read build motion data from {character_motions_path}");
+
+                        let character_motions_file = fs::File::open(&character_motions_path).unwrap_or_else(|_| panic!("Could not read {}! Please remove the assets folder and try again to redownload assets.", &character_motions_path));
+
+                        let character_motions: Model3Root = serde_json::from_reader(
+                            character_motions_file,
+                        ).unwrap();
+                        // .unwrap_or_else(|_| panic!("{character_motions_path} is not formatted properly! Check if MikuMikuLoader is out of date."));
+
+                        let result_pose_file_str = &character_motions.file_references.motions[model.model_pose as usize][0].file;
+
+                        let result_pose = match re_extract_pose.captures(result_pose_file_str) {
+                            Some(result_pose) => {
+                                result_pose[1].to_string()
+                            },
+                            None => {warn!("Could not find any matching result_pose inside {result_pose_file_str}, using w-adult-blushed01!");
+                        "w-adult-blushed01".to_string()}
+                        };
+
+                        // Get expression from SEKAI-Stories index from BuildMotionData
                         let build_motion_data_path =
-                            format!("assets/{full_id}/{}_motion_base/BuildMotionData.json", full_id.replace("_", ""));
+                            format!("assets/public/live2d/motion/{}/BuildMotionData.json", full_id.replace("_", ""));
 
                         debug!("Trying to read build motion data from {build_motion_data_path}");
 
@@ -359,63 +468,17 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
                         )
                         .unwrap_or_else(|_| panic!("{build_motion_data_path} is not formatted properly! Check if MikuMikuLoader is out of date."));
 
-                        // SEKAI-Stories starts at 0
-                        let mut result_expression = None;
-                        let mut result_pose = None;
+                        let result_expression = &character_build_motion.expressions[model.model_expression as usize];
 
-                        for (pos, expression) in
-                            character_build_motion.expressions.iter().enumerate()
-                        {
-                            if pos == model.model_expression as usize {
-                                result_expression = Some(expression.clone())
-                            }
-                        }
-
-                        for (pos, pose) in character_build_motion.motions.iter().enumerate() {
-                            if pos == model.model_pose as usize {
-                                result_pose = Some(pose.clone())
-                            }
-                        }
-
-                        let result_expression = {
-                            match result_expression {
-                                Some(expression) => expression,
-                                None => {
-                                    if model.model_expression == 99999 { // SEKAI-Stories uses this as the default expression definition
-                                        "face_normal_01".to_string()
-                                    } else {
-                                        error!(
-                                        "Could not find expression {}! Please create a bug report. The expression will be replaced with face_cry_01",
-                                        model.model_expression
-                                    );
-                                        "face_cry_01".to_string()
-                                    }
-                                }
-                            }
-                        };
-
-                        let result_pose = {
-                            match result_pose {
-                                Some(pose) => pose,
-                                None => {
-                                    if model.model_pose == 99999 { // SEKAI-Stories uses this as the default pose definition
-                                        "w-adult-blushed01".to_string() // TODO: Find a better default pose.
-                                    } else {
-                                        error!(
-                                        "Could not find expression {}! Please create a bug report. The expression will be replaced with w-cute-glad01",
-                                        model.model_pose
-                                    );
-                                        "w-cute-glad01".to_string()
-                                    }
-                                }
-                            }
-                        };
-
-                        CharacterData {
+                        let char_data = CharacterData {
                             id: character_id,
-                            motion_name: result_pose,
-                            facial_name: result_expression,
-                        }
+                            motion_name: result_pose.to_owned(),
+                            facial_name: result_expression.to_owned(),
+                            costume_type: model.model_name.clone(),
+                        };
+
+                        debug!("Inserting the following CharacterData: {char_data:?}");
+                        char_data
                     } else {
                         error!(
                             "Could not find character {}! Please create a bug report. The expression will be replaced with face_cry_01, and the pose will be replaced with w-cute-glad01",
@@ -425,31 +488,23 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
                         CharacterData {
                             id: 286,
                             motion_name: "w-cute-glad01".to_string(),
-                            facial_name: "face_cry_01".to_string()
+                            facial_name: "face_cry_01".to_string(),
+                            costume_type: "v2_09kohane_casual".to_string(),
                         }
                     }
                 });
 
-                let character_to_push = crate::scenario::ScenarioAdapterAppearCharacters {
-                    character_2d_id: { character_id },
-                    character_costume: model.model_name.clone(),
+                let character_to_push = crate::scenario::ScenarioAppearCharacters {
+                    character2dId: character_id,
+                    costumeType: model.model_name.clone(),
                 };
 
-                if !adapter.appear_characters.contains(&character_to_push) {
+                if !adapter.appearCharacters.contains(&character_to_push) {
+                    debug!("Pushing appearCharacters: {character_to_push:?}");
                     adapter // Push character to appear_characters
-                        .appear_characters
-                        .push(crate::scenario::ScenarioAdapterAppearCharacters {
-                            character_2d_id: { character_id },
-                            character_costume: model.model_name.clone(),
-                        });
+                        .appearCharacters
+                        .push(character_to_push);
                 }
-
-                // TODO: Actually apply offsets here
-                adapter
-                    .character_layout
-                    .push(ScenarioAdapterCharacterLayout {
-                        ..Default::default()
-                    })
             } else {
                 error!(
                     "Only characters from Project Sekai are currently supported! Skipping {}",
@@ -468,23 +523,100 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
             Some(ref character_expressions) => {
                 match character_expressions.get(character_name) {
                     Some(character) => {
-                        adapter.talk_data.push(ScenarioAdapterTalkData {
+                        adapter.talkData.push(ScenarioTalkData {
                             // Push character to talk_data (which will have other fields filled later)
-                            character_2d_id: character.id,
-                            display_name: capitalize(character_name),
-                            text: scene.data.text.dialogue.clone(),
-                            motion: ScenarioAdapterTalkDataMotion {
-                                motion_name: character.motion_name.clone(),
-                                facial_name: character.facial_name.clone(),
+                            talkCharacters: vec![TalkCharacter {
+                                character2dId: character.id,
+                            }],
+                            windowDisplayName: capitalize(character_name),
+                            body: scene.data.text.dialogue.clone(),
+                            motions: {
+                                if initial_scene {
+                                    Vec::new()
+                                } else {
+                                    vec![TalkMotion {
+                                        motionName: character.motion_name.clone(),
+                                        facialName: character.facial_name.clone(),
+                                        character2dId: character.id,
+                                        ..Default::default()
+                                    }]
+                                }
+                            },
+                            // voices: vec![TalkVoice {
+                            //     character2dId: character.id, // TODO: Fill with desired voices
+                            //     ..Default::default()
+                            // }],
+                            voices: Vec::new(),
+                            whenFinishCloseWindow: {
+                                // TODO: Make configurable
+                                if index == payload.data.len() { 1 } else { 0 }
                             },
                             ..Default::default()
+                        });
+
+                        // TODO: Apply offsets and other relavent data
+                        // adapter.layoutData.push(ScenarioCharacterLayout {
+                        //     character2dId: character_id,
+                        //     ..Default::default()
+                        // })
+
+                        let scenario_char_layout = ScenarioCharacterLayout {
+                            r#type: if initial_scene { 2 } else { 0 },
+                            sideFrom: if initial_scene { 4 } else { 3 },
+                            sideFromOffsetX: 0.0,
+                            sideTo: if initial_scene { 4 } else { 3 },
+                            sideToOffsetX: 0.0,
+                            depthType: 0,
+                            character2dId: character.id,
+                            costumeType: if initial_scene {
+                                character.costume_type.clone()
+                            } else {
+                                "".to_owned()
+                            },
+                            motionName: character.motion_name.clone(),
+                            facialName: character.facial_name.clone(),
+                            moveSpeedType: 0,
+                        };
+
+                        adapter.layoutData.push(scenario_char_layout);
+
+                        // If it's the last scene, we need to push an empty layoutdata. Not sure why.
+                        if index == payload.data.len() - 1 {
+                            debug!("Pushing final needed empty ScenarioSnippetCharacterLayout!");
+
+                            adapter.layoutData.push(ScenarioCharacterLayout {
+                                r#type: 3,
+                                sideFrom: 4,
+                                sideFromOffsetX: 0.0,
+                                sideTo: 4,
+                                sideToOffsetX: 0.0,
+                                depthType: 0,
+                                character2dId: character.id,
+                                costumeType: "".to_owned(),
+                                motionName: "".to_owned(),
+                                facialName: "".to_owned(),
+                                moveSpeedType: 0,
+                            })
+                        }
+                        // match adapter.layoutData.contains(&scenario_char_layout) {
+                        //     true => {}
+                        //     false => adapter.layoutData.push(scenario_char_layout),
+                        // };
+
+                        // Push an ScenarioSnippet for our dialogue
+                        adapter.snippets.push(ScenarioSnippet {
+                            index: adapter.snippets.len() as i32,
+                            action: 1,
+                            progressBehavior: 1,
+                            referenceIndex: index as i32,
+                            delay: 2.0,
                         });
                     }
                     None => {
                         error!(
                             "Could not find {character_name} in {character_expressions:?}! Please file a bug report. Default character will be used."
                         );
-                        adapter.talk_data.push(ScenarioAdapterTalkData::default())
+                        adapter.talkData.push(ScenarioTalkData::default())
                     }
                 }
             }
@@ -545,12 +677,18 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
         }
     }
 
-    info!("Converting modpack to AssetBundle...");
+    info!("Creating associated AssetBundle...");
 
-    match create_assetbundle(modpack) {
+    match create_assetbundle(
+        modpack,
+        Some(std::path::Path::new(mod_ab_path).to_path_buf()),
+        true,
+    ) {
         Ok(_) => "Succesfully generated modpack and AssetBundle!".to_string(),
         Err(e) => format!("Failed to convert modpack to AssetBundle: {e}"),
     }
+
+    // TODO: Modify injections-ab.toml with new AssetBundle path instead of having it hardcoded. Will require access to config somehow.
 }
 
 fn capitalize(s: &str) -> String {
