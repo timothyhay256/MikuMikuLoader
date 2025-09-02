@@ -7,6 +7,7 @@ mod utils;
 use std::{
     collections::BTreeMap,
     error::Error,
+    ffi::CString,
     fs::{self, File, OpenOptions, create_dir_all},
     io::{Cursor, Read, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -29,8 +30,14 @@ use futures::{StreamExt, stream::FuturesUnordered};
 use gumdrop::Options;
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
+use image::ImageReader;
 use log::{debug, error, info, warn};
 use notify_rust::Notification;
+use pyo3::{
+    Python,
+    types::{PyAnyMethods, PyModule},
+};
+use pythonize::depythonize;
 use routes::static_handler;
 use rust_embed::Embed;
 use sekai_injector::{Config, Manager, ServerStatistics, load_injection_maps, serve};
@@ -42,9 +49,12 @@ use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::Subs
 use utils::Config as MMLConfig;
 
 use crate::{
-    assetbundle::{decrypt_aes_cbc, encrypt_aes_cbc, get_apimanager_keys, reload_assetbundle_info},
+    assetbundle::{
+        decrypt_aes_cbc, encrypt_aes_cbc, generate_screen_image, get_apimanager_keys,
+        reload_assetbundle_info,
+    },
     mods::ModData,
-    scenario::create_assetbundle,
+    scenario::{PY_CODE, create_assetbundle},
 };
 
 #[derive(Debug, Options)]
@@ -91,6 +101,9 @@ enum Command {
     #[options(help = "generate assetbundle from modpack")]
     GenAssetBundle(GenAssetBundle),
 
+    #[options(help = "generate screen_image with specified images")]
+    GenScreenImage(GenScreenImage),
+
     #[options(help = "reload assetbundle info cache to force asset reloading in game")]
     ReloadAbInfo(ReloadAbInfo),
 }
@@ -120,6 +133,24 @@ struct GenAssetBundle {
 
     #[options(help = "output file", required)]
     output: PathBuf,
+}
+
+#[derive(Debug, Options)]
+struct GenScreenImage {
+    #[options(help = "path to story_bg to insert")]
+    story_bg: Option<PathBuf>,
+
+    #[options(help = "path to banner_event_story to insert")]
+    banner_event_story: Option<PathBuf>,
+
+    #[options(help = "path to story_title to insert")]
+    story_title: Option<PathBuf>,
+
+    #[options(help = "optionally extract all images from assetbundle into provided dir")]
+    extract_path: Option<PathBuf>,
+
+    #[options(help = "optional path to screen_image assetbundle, uses template if not set")]
+    screen_image_path: Option<String>,
 }
 
 #[derive(Debug, Options)]
@@ -359,6 +390,82 @@ async fn main() {
         });
 
         create_assetbundle(mod_data, Some(options.output), true).unwrap();
+
+        return;
+    } else if let Some(Command::GenScreenImage(options)) = opts.command {
+        // TODO: Something other than many unwraps
+        info!("Generating ScreenImage!");
+
+        if let Some(extraction_path) = options.extract_path {
+            if !extraction_path.is_dir() {
+                error!("{} is not an directory!", extraction_path.display());
+            } else {
+                Python::with_gil(|py| {
+                    let filename = CString::new("story_to_assetbundle.py").unwrap();
+                    let modname = CString::new("story_to_assetbundle").unwrap();
+
+                    let module = PyModule::from_code(
+                        py,
+                        &CString::new(PY_CODE).unwrap(),
+                        &filename,
+                        &modname,
+                    )
+                    .unwrap();
+
+                    module
+                        .getattr("set_asset_path")
+                        .unwrap()
+                        .call1((&options
+                            .screen_image_path
+                            .unwrap_or((&"assets/story/screen_image/screen_image").to_string()),))
+                        .unwrap();
+
+                    for img_name in ["story_bg", "banner_event_story", "story_title"] {
+                        let loaded_image: Vec<u8> = depythonize(
+                            &module
+                                .getattr("return_texture2d_img")
+                                .unwrap()
+                                .call1((&img_name,))
+                                .unwrap()
+                                .extract()
+                                .unwrap(),
+                        )
+                        .unwrap();
+
+                        let img = ImageReader::new(Cursor::new(loaded_image))
+                            .with_guessed_format()
+                            .unwrap()
+                            .decode()
+                            .unwrap();
+
+                        let mut dest_path = extraction_path.clone();
+                        dest_path.push(format!("{img_name}.png"));
+                        img.save(dest_path).unwrap();
+                    }
+                });
+
+                return;
+            }
+        }
+
+        let banner_event_story = options.banner_event_story.map(|banner_event_story| {
+            ImageReader::open(banner_event_story)
+                .unwrap()
+                .decode()
+                .unwrap()
+        });
+
+        let story_bg = options
+            .story_bg
+            .map(|story_bg| ImageReader::open(story_bg).unwrap().decode().unwrap());
+
+        let story_title = options
+            .story_title
+            .map(|story_title| ImageReader::open(story_title).unwrap().decode().unwrap());
+
+        generate_screen_image(banner_event_story, story_bg, story_title)
+            .await
+            .unwrap();
 
         return;
     }
