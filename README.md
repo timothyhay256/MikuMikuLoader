@@ -5,7 +5,7 @@
 
 This project requires you to have Python 3 installed when building in order to interface with the UnityPy library, which is used during the final export of a mod. Binaries (will eventually) come with a version of Python.
 
-This project is currently usable. It supports injections of simple stories.
+This project is currently usable. It supports injections of simple stories. 
 
 #### This is currently a work in progress. See the roadmap below.
 
@@ -23,7 +23,7 @@ This project is currently usable. It supports injections of simple stories.
 
 ## Stories roadmap
 - [ ] Custom stories
-- [ ] Custom story names
+- [X] Custom story background img/title card
 - [ ] Custom voiceovers
 - [ ] Custom backgrounds
 - [ ] Scene transition support

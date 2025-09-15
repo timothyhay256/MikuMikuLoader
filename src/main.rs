@@ -21,6 +21,7 @@ use anyhow::Result;
 use axum::{
     Router,
     body::Body,
+    extract::DefaultBodyLimit,
     http::{StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -32,6 +33,7 @@ use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use image::ImageReader;
 use log::{debug, error, info, warn};
+#[cfg(not(debug_assertions))]
 use notify_rust::Notification;
 use pyo3::{
     Python,
@@ -50,8 +52,8 @@ use utils::Config as MMLConfig;
 
 use crate::{
     assetbundle::{
-        decrypt_aes_cbc, encrypt_aes_cbc, generate_screen_image, get_apimanager_keys,
-        reload_assetbundle_info,
+        decrypt_aes_cbc, encrypt_aes_cbc, generate_logo, generate_screen_image,
+        get_apimanager_keys, reload_assetbundle_info,
     },
     mods::ModData,
     scenario::{PY_CODE, create_assetbundle},
@@ -101,8 +103,8 @@ enum Command {
     #[options(help = "generate assetbundle from modpack")]
     GenAssetBundle(GenAssetBundle),
 
-    #[options(help = "generate screen_image with specified images")]
-    GenScreenImage(GenScreenImage),
+    #[options(help = "generate screen_image and logo with specified images")]
+    GenStoryImageBundles(GenStoryImageBundles),
 
     #[options(help = "reload assetbundle info cache to force asset reloading in game")]
     ReloadAbInfo(ReloadAbInfo),
@@ -136,7 +138,7 @@ struct GenAssetBundle {
 }
 
 #[derive(Debug, Options)]
-struct GenScreenImage {
+struct GenStoryImageBundles {
     #[options(help = "path to story_bg to insert")]
     story_bg: Option<PathBuf>,
 
@@ -146,11 +148,20 @@ struct GenScreenImage {
     #[options(help = "path to story_title to insert")]
     story_title: Option<PathBuf>,
 
+    #[options(help = "path to logo to insert into logo assetbundle")]
+    logo_path: Option<PathBuf>,
+
     #[options(help = "optionally extract all images from assetbundle into provided dir")]
     extract_path: Option<PathBuf>,
 
     #[options(help = "optional path to screen_image assetbundle, uses template if not set")]
     screen_image_path: Option<String>,
+
+    #[options(help = "output path for newly generated screen_image AssetBundle")]
+    result_screen_image_assetbundle_path: Option<String>,
+
+    #[options(help = "output path for optionally newly generated logo AssetBundle")]
+    result_logo_assetbundle_path: Option<String>,
 }
 
 #[derive(Debug, Options)]
@@ -220,10 +231,7 @@ async fn main() {
         }
     }));
 
-    let config_path = match opts.config {
-        Some(config) => config,
-        None => "MikuMiku.toml".to_string(),
-    };
+    let config_path = opts.config.unwrap_or("MikuMiku.toml".to_string());
 
     let mut config_file_contents = String::new();
 
@@ -392,15 +400,16 @@ async fn main() {
         create_assetbundle(mod_data, Some(options.output), true).unwrap();
 
         return;
-    } else if let Some(Command::GenScreenImage(options)) = opts.command {
-        // TODO: Something other than many unwraps
-        info!("Generating ScreenImage!");
+    } else if let Some(Command::GenStoryImageBundles(options)) = opts.command {
+        // TODO: Something other than many unwraps, this is very messy
 
+        // If we just want to extract the images and exit
         if let Some(extraction_path) = options.extract_path {
             if !extraction_path.is_dir() {
                 error!("{} is not an directory!", extraction_path.display());
+                return;
             } else {
-                Python::with_gil(|py| {
+                Python::attach(|py| {
                     let filename = CString::new("story_to_assetbundle.py").unwrap();
                     let modname = CString::new("story_to_assetbundle").unwrap();
 
@@ -412,35 +421,70 @@ async fn main() {
                     )
                     .unwrap();
 
-                    module
-                        .getattr("set_asset_path")
-                        .unwrap()
-                        .call1((&options
-                            .screen_image_path
-                            .unwrap_or((&"assets/story/screen_image/screen_image").to_string()),))
-                        .unwrap();
+                    let assetbundle_array =
+                        if let Some(logo_assetbundle_path) = options.result_logo_assetbundle_path {
+                            [
+                                options.result_screen_image_assetbundle_path,
+                                Some(logo_assetbundle_path),
+                            ]
+                        } else {
+                            [options.result_screen_image_assetbundle_path, None]
+                        };
 
-                    for img_name in ["story_bg", "banner_event_story", "story_title"] {
-                        let loaded_image: Vec<u8> = depythonize(
-                            &module
-                                .getattr("return_texture2d_img")
+                    // Contains all possible names for screen_image and episode_image, and just ignores missing names. TODO: At some point it should probably support more than just event_whip...
+                    for ref assetbundle_path in assetbundle_array.into_iter().flatten() {
+                        for img_name in [
+                            "story_bg",
+                            "banner_event_story",
+                            "story_title",
+                            "event_whip_2024_01",
+                            "event_whip_2024_02",
+                            "event_whip_2024_03",
+                            "event_whip_2024_04",
+                            "event_whip_2024_05",
+                            "event_whip_2024_06",
+                            "event_whip_2024_07",
+                            "event_whip_2024_08",
+                            "logo",
+                        ] {
+                            module
+                                .getattr("set_asset_path")
                                 .unwrap()
-                                .call1((&img_name,))
-                                .unwrap()
-                                .extract()
-                                .unwrap(),
-                        )
-                        .unwrap();
+                                .call1((&options
+                                    .screen_image_path
+                                    .clone()
+                                    .unwrap_or(assetbundle_path.to_string()),))
+                                .unwrap();
 
-                        let img = ImageReader::new(Cursor::new(loaded_image))
-                            .with_guessed_format()
-                            .unwrap()
-                            .decode()
-                            .unwrap();
+                            match depythonize::<Vec<u8>>(
+                                &module
+                                    .getattr("return_texture2d_img")
+                                    .unwrap()
+                                    .call1((&img_name,))
+                                    .unwrap()
+                                    .extract()
+                                    .unwrap(),
+                            ) {
+                                Ok(loaded_image) => {
+                                    if !loaded_image.is_empty() {
+                                        let img = ImageReader::new(Cursor::new(loaded_image))
+                                            .with_guessed_format()
+                                            .unwrap()
+                                            .decode()
+                                            .unwrap();
 
-                        let mut dest_path = extraction_path.clone();
-                        dest_path.push(format!("{img_name}.png"));
-                        img.save(dest_path).unwrap();
+                                        let mut dest_path = extraction_path.clone();
+                                        dest_path.push(format!("{img_name}.png"));
+                                        img.save(&dest_path).unwrap();
+
+                                        info!("Saved image to {}", dest_path.display());
+                                    } else {
+                                        warn!("{img_name} returned no bytes! Skipping export.");
+                                    }
+                                }
+                                Err(_e) => {} // TODO: Match this error to ensure its an invalid type error
+                            }
+                        }
                     }
                 });
 
@@ -448,24 +492,40 @@ async fn main() {
             }
         }
 
-        let banner_event_story = options.banner_event_story.map(|banner_event_story| {
-            ImageReader::open(banner_event_story)
-                .unwrap()
-                .decode()
-                .unwrap()
-        });
+        // This will assume all paths passed are PNGs since this isn't really meant to be used by the user.
 
-        let story_bg = options
-            .story_bg
-            .map(|story_bg| ImageReader::open(story_bg).unwrap().decode().unwrap());
+        if let Some(screen_image_path) = options.screen_image_path {
+            info!("Generating screen_image!");
+            tokio::fs::copy("assets/story/screen_image/screen_image", &screen_image_path)
+                .await
+                .unwrap();
 
-        let story_title = options
-            .story_title
-            .map(|story_title| ImageReader::open(story_title).unwrap().decode().unwrap());
-
-        generate_screen_image(banner_event_story, story_bg, story_title)
+            generate_screen_image(
+                &screen_image_path,
+                options.banner_event_story,
+                options.story_bg,
+                options.story_title,
+            )
             .await
             .unwrap();
+        }
+
+        // If we are generating the logo
+
+        if let Some(logo_assetbundle_path) = options.result_logo_assetbundle_path {
+            info!("Generating logo!");
+
+            tokio::fs::copy("assets/event/logo/logo", &logo_assetbundle_path)
+                .await
+                .unwrap();
+
+            generate_logo(
+                logo_assetbundle_path,
+                options.logo_path.expect("New logo path must be set"),
+            )
+            .await
+            .unwrap();
+        }
 
         return;
     }
@@ -672,12 +732,13 @@ async fn main() {
         .route("/generate-cert", post(routes::gen_cert))
         .route(
             "/export-custom-story",
-            post(routes::export_story_to_modpack),
+            post(move |body| routes::export_story_to_modpack(config_holder, asset_version, body)),
         )
         .route("/local-ip", get(routes::return_local_ip))
         .route("/version", get(routes::return_version))
         .route("/mod-list", get(routes::mod_list))
-        .with_state(Arc::clone(&manager));
+        .with_state(Arc::clone(&manager))
+        .layer(DefaultBodyLimit::max(31457280)); // 30 MiB
 
     let webui_app = static_routes.merge(api_routes);
 
@@ -743,6 +804,8 @@ async fn sekai_injector_serve(manager: Arc<RwLock<Manager>>) {
 pub fn notify_mml(body: &str) {
     info!("{body}");
 
+    // Disable desktop notifications on Debug mode
+    #[cfg(not(debug_assertions))]
     if let Err(e) = Notification::new()
         .appname("MikuMikuLoader")
         .summary("MikuMikuLoader")
@@ -794,7 +857,10 @@ pub fn update_injection_appversion(
         if assetbundle_domain.resource_prefix.is_some() {
             warn!("Prefix is manually set, will not override with up-to-date apphash and version!");
         } else {
-            let prefix = format!("/{}/{}", versions.data_version, versions.asset_hash);
+            let prefix = format!(
+                "{}/{}/{}",
+                versions.data_version, versions.asset_hash, mml_config.platform
+            );
             debug!("Setting prefix to {prefix}");
 
             assetbundle_domain.resource_prefix = Some(prefix);

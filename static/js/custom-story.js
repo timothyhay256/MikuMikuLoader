@@ -1,4 +1,9 @@
 var scenesData = [];
+var banner_image = null;
+var story_background = null;
+var title_background = null;
+var logo = null;
+
 var index = 0;
 
 document.getElementById("add-scene-btn").addEventListener("click", addScene);
@@ -129,9 +134,16 @@ document.getElementById("generate-mod").addEventListener("click", function (even
     event.preventDefault();
 
     const storyFile = document.getElementById("modpackfile").value;
+    const modpackName = document.getElementById("modpackname").value;
+
     const data = JSON.stringify({
         file_name: storyFile,
-        data: scenesData
+        modpack_name: modpackName,
+        banner_image: banner_image,
+        story_background: story_background,
+        title_background: title_background,
+        logo: logo,
+        data: scenesData,
     });
 
     console.log(`Trying to submit ${data}`);
@@ -158,6 +170,89 @@ document.getElementById("generate-mod").addEventListener("click", function (even
             alert(`There was an error exporting the story. Please make sure each scene has valid SEKAI-Stories JSON. Error: ${error}`);
         });
 });
+
+const fileSelector = document.getElementById('file-selector');
+fileSelector.addEventListener('change', (event) => {
+    let file = event.target.files[0];
+
+    (async () => {
+        const fileContent = await file.text();
+        var arr = JSON.parse(fileContent);
+
+        const scenes = document.getElementById("scrollmenu");
+
+        if (scenes != null) {
+            while (scenes.children.length > 1) {
+                scenes.removeChild(scenes.lastElementChild);
+            }
+        }
+
+        scenesData = [];
+
+        for (var i = 0; i < arr.scenesData.length; i++) {
+            index = arr.scenesData[i].index;
+            addScene();
+
+            document.getElementById(`json-${index - 1}`).value = JSON.stringify(arr.scenesData[i].data, null, 2);
+
+            scenesData.push({ index: parseInt(index - 1), data: arr.scenesData[i].data });
+        }
+    })();
+});
+
+const storyTitleSelector = document.getElementById('story-banner');
+storyTitleSelector.addEventListener('change', (event) => {
+    let file = event.target.files[0];
+
+    var promise = getBase64(file);
+    promise.then(function (result) {
+        banner_image = result;
+    });
+});
+
+const storyBgSelector = document.getElementById('story-bg');
+storyBgSelector.addEventListener('change', (event) => {
+    let file = event.target.files[0];
+
+    var promise = getBase64(file);
+    promise.then(function (result) {
+        story_background = result;
+    });
+});
+
+const storyTitleBgSelector = document.getElementById('story-title-bg');
+storyTitleBgSelector.addEventListener('change', (event) => {
+    let file = event.target.files[0];
+
+    var promise = getBase64(file);
+    promise.then(function (result) {
+        title_background = result;
+    });
+});
+
+const logoSelector = document.getElementById('logo');
+logoSelector.addEventListener('change', (event) => {
+    let file = event.target.files[0];
+
+    var promise = getBase64(file);
+    promise.then(function (result) {
+        logo = result;
+    });
+});
+
+function getBase64(file) {
+    return new Promise(function (resolve, reject) {
+        var reader = new FileReader();
+        reader.onload = function () {
+            // Extract just the base64 part after the comma
+            const base64 = reader.result.split(',')[1];
+            resolve(base64);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
 
 function auto_grow(element) {
     element.style.height = "5px";
@@ -192,32 +287,3 @@ const streamToText = async (blob) => {
 
     return new TextDecoder('utf-8').decode(chunk.value);
 };
-
-const fileSelector = document.getElementById('file-selector');
-fileSelector.addEventListener('change', (event) => {
-    let file = event.target.files[0];
-
-    (async () => {
-        const fileContent = await file.text();
-        var arr = JSON.parse(fileContent);
-
-        const scenes = document.getElementById("scrollmenu");
-
-        if (scenes != null) {
-            while (scenes.children.length > 1) {
-                scenes.removeChild(scenes.lastElementChild);
-            }
-        }
-
-        scenesData = [];
-
-        for (var i = 0; i < arr.scenesData.length; i++) {
-            index = arr.scenesData[i].index;
-            addScene();
-
-            document.getElementById(`json-${index - 1}`).value = JSON.stringify(arr.scenesData[i].data, null, 2);
-
-            scenesData.push({ index: parseInt(index - 1), data: arr.scenesData[i].data });
-        }
-    })();
-});

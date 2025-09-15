@@ -1,16 +1,24 @@
 use std::{
     collections::HashMap,
     env,
-    fs::{self, create_dir},
-    path::Path as fPath,
+    fs::{self, File, create_dir},
+    io::Cursor,
+    path::{Path as fPath, Path as FPath},
     sync::Arc,
 };
 
+use anyhow::Result;
 use axum::{
     Json,
     extract::{Path, State},
     http::Uri,
     response::IntoResponse,
+};
+use base64::prelude::*;
+use image::{
+    DynamicImage, ImageEncoder,
+    codecs::png::{CompressionType, FilterType, PngEncoder},
+    load_from_memory,
 };
 use local_ip_address::local_ip;
 use log::{debug, error, info, warn};
@@ -23,12 +31,14 @@ use walkdir::WalkDir;
 
 use crate::{
     StaticFile,
-    mods::{CacheInvalidDuration, InvalidateCacheEntry, ModData, ModType},
+    assetbundle::{generate_logo, generate_screen_image, reload_assetbundle_info},
+    encrypt,
+    mods::{CacheInvalidDuration, InvalidateCacheEntry, ModData, ModType, reload_injections},
     notify_mml,
     scenario::{
-        CharacterData, CustomStory, ScenarioCharacterLayout, ScenarioSnippet,
+        CharacterData, CustomStory, SCENARIO_PATH_ID, ScenarioCharacterLayout, ScenarioSnippet,
         ScenarioSpecialEffect, ScenarioTalkData, TalkCharacter, TalkMotion, create_assetbundle,
-        load_ab_typetree,
+        load_scenario_typetree,
     },
     utils::{self, Model3Root},
 };
@@ -271,12 +281,17 @@ pub async fn gen_ca(Json(payload): Json<CAGenOptions>) -> impl IntoResponse {
     ))
 }
 
-pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl IntoResponse {
+pub async fn export_story_to_modpack(
+    config: utils::Config,
+    asset_version: String,
+    Json(payload): Json<CustomStory>,
+) -> impl IntoResponse {
     // TODO: Clean up, make more efficient, make this an impl
     // TODO: Apply model transform
-    info!("Received story export to modpack request at export_story endpoint: {payload:?}");
+    // debug!("Received story export to modpack request at export_story endpoint: {payload:?}");
+    info!("Exporting story to modpack and generating AssetBundles");
 
-    let mod_name = payload.file_name.replace(".toml", "");
+    let mod_name = payload.modpack_name;
     let mod_ab_path = &format!("mods/{mod_name}.ab");
 
     // Load character2ds
@@ -298,10 +313,15 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
     );
 
     // Loads the template typetree which we will then modify
+    let scenario_typetree = match load_scenario_typetree(SCENARIO_PATH_ID) {
+        Ok(scenario_typetree) => scenario_typetree,
+        Err(e) => return format!("Failed to load typetree. Is UnityPy installed? Err: {e}"),
+    };
+
     let mut modpack = ModData {
         mod_name: mod_name.clone(),
         enabled: true,
-        mod_type: crate::mods::ModType::Story(load_ab_typetree().unwrap()),
+        mod_type: crate::mods::ModType::Story(scenario_typetree),
         // TODO: Change resource_path and duration
         invalidated_assets: vec![InvalidateCacheEntry {
             resource_path: "event_story/event_whip_2024/scenario".to_string(),
@@ -638,6 +658,165 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
         }
     }
 
+    info!("Creating associated AssetBundles...");
+
+    // Generate screen_image AssetBundle
+
+    // Deleted when dropped, thus we need it here
+    let banner_image_tmp_file = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+    let banner_image = {
+        match png_from_base64_str(payload.banner_image) {
+            Ok(img) => {
+                if let Some(image) = img {
+                    let img_path = banner_image_tmp_file.path().display().to_string();
+                    save_png_best_compression(&image, &img_path).unwrap();
+                    Some(FPath::new(&img_path).to_path_buf())
+                } else {
+                    None
+                }
+            }
+            Err(e) => {
+                return format!("Banner image provided is not an valid image! Err: {e}")
+                    .to_string();
+            }
+        }
+    };
+
+    let story_background_tmp_file = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+    let story_background = {
+        match png_from_base64_str(payload.story_background) {
+            Ok(img) => {
+                if let Some(image) = img {
+                    let img_path = story_background_tmp_file.path().display().to_string();
+                    save_png_best_compression(&image, &img_path).unwrap();
+                    Some(FPath::new(&img_path).to_path_buf())
+                } else {
+                    None
+                }
+            }
+            Err(e) => {
+                return format!("Banner image provided is not an valid image! Err: {e}")
+                    .to_string();
+            }
+        }
+    };
+
+    let title_background_tmp_file = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+    let title_background = {
+        match png_from_base64_str(payload.title_background) {
+            Ok(img) => {
+                if let Some(image) = img {
+                    let img_path = title_background_tmp_file.path().display().to_string();
+                    save_png_best_compression(&image, &img_path).unwrap();
+                    Some(FPath::new(&img_path).to_path_buf())
+                } else {
+                    None
+                }
+            }
+            Err(e) => {
+                return format!("Banner image provided is not an valid image! Err: {e}")
+                    .to_string();
+            }
+        }
+    };
+
+    // Copy template and generate new screen_image assetbundle in place of the copied original assetbundle
+    let screen_image_path = format!("mods/{mod_name}-screenImage.ab");
+    tokio::fs::copy("assets/story/screen_image/screen_image", &screen_image_path)
+        .await
+        .unwrap();
+
+    info!("Generating screen image");
+    match generate_screen_image(
+        &screen_image_path,
+        banner_image,
+        story_background,
+        title_background,
+    )
+    .await
+    {
+        Ok(_) => {
+            modpack.invalidated_assets.push(InvalidateCacheEntry {
+                resource_path: "event_story/event_whip_2024/screen_image".to_string(),
+                duration: CacheInvalidDuration::PermanentlyInvalid,
+            });
+
+            modpack.injected_assets.insert(
+                "event_story/event_whip_2024/screen_image".to_string(),
+                screen_image_path.clone(),
+            );
+
+            // Encrypt new AssetBundle
+
+            info!("Encrypting new AssetBundle {}", &screen_image_path);
+
+            let screen_image_path = FPath::new(&screen_image_path);
+            match encrypt(screen_image_path, screen_image_path) {
+                Ok(_) => {
+                    info!("Encrypted AssetBundle")
+                }
+                Err(e) => {
+                    error!("Could not encrypt {}: {}", screen_image_path.display(), e)
+                }
+            };
+        }
+        Err(e) => error!("Failed to generate screen_image! Default will be used. Err: {e}"),
+    };
+
+    // Copy template and generate new logo assetbundle in place of the copied original assetbundle
+    let logo_ab_path = format!("mods/{mod_name}-logo.ab");
+    tokio::fs::copy("assets/event/logo/logo", &logo_ab_path)
+        .await
+        .unwrap();
+
+    // Save image to temp path since generate_logo requires an path (which is needed because UnityPy requires it)
+
+    let logo = {
+        match png_from_base64_str(payload.logo) {
+            Ok(img) => img,
+            Err(e) => {
+                return format!("Banner image provided is not an valid image! Err: {e}")
+                    .to_string();
+            }
+        }
+    };
+
+    let image_file = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+    let img_path = image_file.path().display().to_string();
+    if let Some(logo) = logo {
+        save_png_best_compression(&logo, &img_path).unwrap();
+    }
+
+    info!("Generating logo AssetBundle");
+    match generate_logo(logo_ab_path.clone(), FPath::new(&img_path).to_path_buf()).await {
+        Ok(_) => {
+            modpack.invalidated_assets.push(InvalidateCacheEntry {
+                resource_path: "event/event_whip_2024/logo".to_string(),
+                duration: CacheInvalidDuration::PermanentlyInvalid,
+            });
+
+            modpack.injected_assets.insert(
+                "event/event_whip_2024/logo".to_string(),
+                logo_ab_path.clone(),
+            );
+
+            // Encrypt new AssetBundle
+
+            info!("Encrypting new AssetBundle {}", &logo_ab_path);
+
+            let logo_ab_path = FPath::new(&logo_ab_path);
+            match encrypt(logo_ab_path, logo_ab_path) {
+                Ok(_) => {
+                    info!("Encrypted AssetBundle")
+                }
+                Err(e) => {
+                    error!("Could not encrypt {}: {}", logo_ab_path.display(), e)
+                }
+            };
+        }
+        Err(e) => error!("Failed to generate logo! Default will be used. Err: {e}"),
+    };
+
     let file_name = {
         if payload.file_name.contains(".toml") {
             payload.file_name
@@ -686,18 +865,78 @@ pub async fn export_story_to_modpack(Json(payload): Json<CustomStory>) -> impl I
         }
     }
 
-    info!("Creating associated AssetBundle...");
-
+    info!("Creating scenario");
     match create_assetbundle(
         modpack,
         Some(std::path::Path::new(mod_ab_path).to_path_buf()),
         true,
     ) {
-        Ok(_) => "Succesfully generated modpack and AssetBundle!".to_string(),
+        Ok(_) => {
+            // Modifies injections-ab with required paths
+            info!("Reloading injections!");
+            match reload_injections(&config) {
+                Ok(_) => {
+                    info!(
+                        "Reloading assetbundle info hashes! This may trigger multiple redownloads within the game."
+                    );
+
+                    match reload_assetbundle_info(&config, &asset_version).await {
+                        Ok(_) => {
+                            let msg = "Succesfully generated modpack and AssetBundle!".to_string();
+                            info!("{msg}");
+                            msg
+                        }
+                        Err(e) => {
+                            let msg = format!("Failed to reload assetbundle info! Err: {e}");
+                            error!("{msg}");
+                            msg
+                        }
+                    }
+                }
+                Err(e) => {
+                    let msg = format!("Failed to reload injections! Err: {e}");
+                    error!("{msg}");
+                    msg
+                }
+            }
+        }
         Err(e) => format!("Failed to convert modpack to AssetBundle: {e}"),
     }
+}
 
-    // TODO: Modify injections-ab.toml with new AssetBundle path instead of having it hardcoded. Will require access to config somehow.
+// Needed because UnityPy seems to take a very long time with images
+fn save_png_best_compression(
+    img: &DynamicImage,
+    path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let file = File::create(path)?;
+
+    // Convert image to RGBA8 buffer
+    let rgba8 = img.to_rgba8();
+    let (width, height) = rgba8.dimensions();
+
+    // Use best compression + adaptive filtering
+    let encoder = PngEncoder::new_with_quality(
+        file,
+        CompressionType::Best, // max DEFLATE compression
+        FilterType::Adaptive,  // usually smallest files
+    );
+
+    encoder.write_image(&rgba8, width, height, image::ExtendedColorType::Rgba8)?;
+    Ok(())
+}
+
+fn png_from_base64_str(base64: Option<String>) -> Result<Option<DynamicImage>> {
+    if let Some(base64) = base64 {
+        let image_bytes = BASE64_STANDARD.decode(base64.as_bytes())?;
+        let img = load_from_memory(&image_bytes)?;
+
+        let mut image_buffer = Cursor::new(Vec::new());
+        img.write_to(&mut image_buffer, image::ImageFormat::Png)?;
+        Ok(Some(load_from_memory(&image_buffer.into_inner())?))
+    } else {
+        Ok(None)
+    }
 }
 
 fn capitalize(s: &str) -> String {

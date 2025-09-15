@@ -13,7 +13,11 @@ common_asset_url = "raw.githubusercontent.com/Sekai-World/sekai-master-db-en-dif
 template_asset_url = "raw.githubusercontent.com/timothyhay256/MML-templates/refs/heads/main"
 live2d_asset_url = "raw.githubusercontent.com/lezzthanthree/SEKAI-Stories/refs/heads/master"
 needed_asset_files = ["character2ds.json", "versions.json"]
-needed_template_files = ["story/scenario/scenario"]
+needed_template_files = [
+    "story/scenario/scenario",
+    "story/screen_image/screen_image",
+    "event/logo/logo",
+]
 needed_live2d_files = [
     "/public/live2d/model/01ichika/01ichika_cloth001/01ichika_cloth001.model3.json",
     "/public/live2d/model/01ichika/01ichika_culture/01ichika_culture.model3.json",

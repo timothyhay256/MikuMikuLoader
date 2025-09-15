@@ -3,14 +3,14 @@ use std::collections::HashMap;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, Clone)]
 pub struct Config {
     pub advanced: AdvancedConfig,
     pub platform: String,
     pub region: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct AdvancedConfig {
     pub sekai_injector_config_path: String,
     pub assetbundle_url: String,

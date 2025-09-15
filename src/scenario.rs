@@ -20,10 +20,10 @@ use crate::{
 };
 
 /// Contains all relevant UnityPy code for loading and exporting a typetree.
-const PY_CODE: &str = include_str!("../python/story_to_assetbundle.py");
+pub const PY_CODE: &str = include_str!("../python/story_to_assetbundle.py");
 
 /// The path id to the scenario in the template we are using, which in this case is the whip_2024 scenario but stripped of anything but the bare min.
-static SCENARIO_PATH_ID: i64 = 6343946530110770478;
+pub static SCENARIO_PATH_ID: i64 = 6343946530110770478;
 
 /// Contains all relevant data that makes up a scenario.
 /// Directly represents the typetree from UnityPy.
@@ -425,6 +425,11 @@ impl Default for ScenarioSnippetLayoutMode {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CustomStory {
     pub file_name: String,
+    pub modpack_name: String,
+    pub banner_image: Option<String>,
+    pub story_background: Option<String>,
+    pub title_background: Option<String>,
+    pub logo: Option<String>,
     pub data: Vec<CustomStoryScene>,
 }
 
@@ -492,7 +497,7 @@ pub fn create_assetbundle(
     copy("assets/story/scenario/scenario", mod_ab_path.clone())?; // TODO: Don't hardcode
 
     match modpack.mod_type {
-        ModType::Story(scenario_adapter) => Python::with_gil(|py| {
+        ModType::Story(scenario_adapter) => Python::attach(|py| {
             let filename = CString::new("story_to_assetbundle.py").unwrap();
             let modname = CString::new("story_to_assetbundle").unwrap();
 
@@ -532,8 +537,8 @@ pub fn create_assetbundle(
 }
 
 /// Loads the AssetBundle typetree from assets/story/scenario/scenario template
-pub fn load_ab_typetree() -> Result<Scenario> {
-    Python::with_gil(|py| {
+pub fn load_scenario_typetree(path_id: i64) -> Result<Scenario> {
+    Python::attach(|py| {
         let filename = CString::new("story_to_assetbundle.py").unwrap();
         let modname = CString::new("story_to_assetbundle").unwrap();
 
@@ -543,9 +548,7 @@ pub fn load_ab_typetree() -> Result<Scenario> {
             .getattr("set_asset_path")?
             .call1((&"assets/story/scenario/scenario",))?;
 
-        module
-            .getattr("set_target_path_id")?
-            .call1((SCENARIO_PATH_ID,))?;
+        module.getattr("set_target_path_id")?.call1((path_id,))?;
 
         let typetree: Scenario =
             depythonize(&module.getattr("return_typetree")?.call0()?.extract()?)?;

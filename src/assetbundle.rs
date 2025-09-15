@@ -1,4 +1,7 @@
-use std::path::Path;
+use std::{
+    ffi::CString,
+    path::{Path, PathBuf},
+};
 
 // Credit for reverse engineering and decryption method of assetbundle info goes to https://github.com/mos9527/sssekai
 use aes::Aes128;
@@ -6,7 +9,11 @@ use anyhow::{Context, Result};
 use block_padding::Pkcs7;
 use cbc::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use chrono::{Datelike, Local, Timelike};
-use log::{debug, error, warn};
+use log::{debug, error, info, warn};
+use pyo3::{
+    Python,
+    types::{PyAnyMethods, PyModule},
+};
 use rand::Rng;
 use serde::Serialize;
 use tokio::{
@@ -17,6 +24,7 @@ use walkdir::WalkDir;
 
 use crate::{
     mods::{CacheInvalidDuration, ModData},
+    scenario::PY_CODE,
     utils::{ABInfoRoot, Config},
 };
 
@@ -168,4 +176,71 @@ pub async fn reload_assetbundle_info(config: &Config, asset_version: &String) ->
     assetbundle_info.flush().await?;
 
     Ok(())
+}
+
+/// Accepts Option<PathBuf> and generates an screen_image assetbundle from it.
+/// If an image is not set, it will not be modified, and will be the default in the template.
+/// Requires passing the path as in UnityPy saving from an buffer in memory is incredibly slow
+pub async fn generate_screen_image(
+    assetbundle_path: &String,
+    banner_event_story: Option<PathBuf>,
+    story_bg: Option<PathBuf>,
+    story_title: Option<PathBuf>,
+) -> Result<()> {
+    Python::attach(|py| {
+        let filename = CString::new("story_to_assetbundle.py").unwrap();
+        let modname = CString::new("story_to_assetbundle").unwrap();
+
+        let module = PyModule::from_code(py, &CString::new(PY_CODE).unwrap(), &filename, &modname)?;
+
+        module
+            .getattr("set_asset_path")?
+            .call1((&assetbundle_path,))?;
+
+        for img in ["story_bg", "banner_event_story", "story_title"]
+            .iter()
+            .zip([story_bg, banner_event_story, story_title])
+            .enumerate()
+        {
+            if let Some(image_path) = img.1.1 {
+                info!("Saving texture2d for {}", img.1.0);
+                info!("calling with: {}, {}, {}", img.1.0, image_path.display(), {
+                    img.0 == 2
+                });
+                module.getattr("save_texture2d_img")?.call1((
+                    img.1.0,
+                    image_path.display().to_string(),
+                    { img.0 == 2 },
+                ))?;
+            }
+        }
+
+        Ok(())
+    })
+}
+
+/// Accepts Option<DynamicImage> and generates an logo assetbundle from it
+/// If an image is not set, it will not be modified, and will be the default in the template.
+/// Requires an path since UnityPy only accepts an file path when modifying a sprite.
+pub async fn generate_logo(assetbundle_path: String, logo_path: PathBuf) -> Result<()> {
+    Python::attach(|py| {
+        let filename = CString::new("story_to_assetbundle.py").unwrap();
+        let modname = CString::new("story_to_assetbundle").unwrap();
+
+        let module = PyModule::from_code(py, &CString::new(PY_CODE).unwrap(), &filename, &modname)?;
+
+        module
+            .getattr("set_asset_path")?
+            .call1((&assetbundle_path,))?;
+
+        module
+            .getattr("save_texture2d_img")?
+            .call1(("logo", logo_path.clone(), true))?;
+
+        module
+            .getattr("save_sprite_img")?
+            .call1(("logo", logo_path, true))?;
+
+        Ok(())
+    })
 }
