@@ -8,7 +8,7 @@ use std::{
     collections::BTreeMap,
     error::Error,
     ffi::CString,
-    fs::{self, File, OpenOptions, create_dir_all},
+    fs::{self, File, OpenOptions, create_dir, create_dir_all},
     io::{Cursor, Read, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     panic,
@@ -32,6 +32,7 @@ use gumdrop::Options;
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use image::ImageReader;
+use local_ip_address::local_ip;
 use log::{debug, error, info, warn};
 #[cfg(not(debug_assertions))]
 use notify_rust::Notification;
@@ -42,7 +43,7 @@ use pyo3::{
 use pythonize::depythonize;
 use routes::static_handler;
 use rust_embed::Embed;
-use sekai_injector::{Config, Manager, ServerStatistics, load_injection_maps, serve};
+use sekai_injector::{Config, Domain, Manager, ServerStatistics, load_injection_maps, serve};
 use serde::Deserialize;
 use simple_dns_server::{Config as DConfig, RecordInfo, RecordType, SimpleDns};
 use tokio::{sync::RwLock, task};
@@ -545,8 +546,29 @@ async fn main() {
                 .expect("The config file was not formatted properly and could not be read.")
         }
         Err(_) => {
-            warn!("No sekai injector config found, using defaults!");
-            sekai_injector::Config::default()
+            warn!("No sekai injector config found, using a default!");
+            Config {
+                inject_resources: true,
+                domains: vec![
+                    Domain {
+                        resource_config: "injections-ab.toml".to_string(),
+                        address: "assetbundle.sekai-en.com".to_string(),
+                        server_cert: "server_cert_ab.pem".to_string(),
+                        server_key: "server_key_ab.pem".to_string(),
+                        resource_prefix: None,
+                    },
+                    Domain {
+                        resource_config: "injections-abinfo.toml".to_string(),
+                        address: "assetbundle-info.sekai-en.com".to_string(),
+                        server_cert: "server_cert_abinfo.pem".to_string(),
+                        server_key: "server_key_abinfo.pem".to_string(),
+                        resource_prefix: None,
+                    },
+                ],
+                target_ip: local_ip()
+                    .unwrap_or(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)))
+                    .to_string(),
+            }
         }
     };
 
@@ -595,8 +617,7 @@ async fn main() {
             let msg = &format!(
                 "Could not update appversion and apphash prefix for assetbundle domain. It is likely injection will never trigger. Err: {e}"
             );
-            error!("{msg}");
-            notify_mml(msg);
+            warn!("{msg}");
             (String::from(""), String::from(""), String::from(""))
         }
     };
@@ -622,6 +643,10 @@ async fn main() {
     info!(
         "Reloading assetbundle info hashes! This may trigger multiple redownloads within the game."
     );
+
+    if !Path::new("mods").exists() {
+        create_dir("mods").expect("Can not create mods directory");
+    }
 
     reload_assetbundle_info(&config_holder, &asset_version)
         .await
@@ -866,9 +891,14 @@ pub fn update_injection_appversion(
             assetbundle_domain.resource_prefix = Some(prefix);
         }
     } else {
-        anyhow::bail!(
+        error!(
             "Could not update required request prefixes, may be unable to succesfully inject resources!"
         );
+        return Ok((
+            versions.app_hash,
+            versions.data_version,
+            versions.asset_version,
+        ));
     }
 
     if let Some(assetbundle_info_domain) = injector_config
@@ -888,9 +918,14 @@ pub fn update_injection_appversion(
             assetbundle_info_domain.resource_prefix = Some(prefix);
         }
     } else {
-        anyhow::bail!(
+        error!(
             "Could not update required request prefixes, may be unable to succesfully inject resources!"
         );
+        return Ok((
+            versions.app_hash,
+            versions.data_version,
+            versions.asset_version,
+        ));
     }
 
     Ok((
