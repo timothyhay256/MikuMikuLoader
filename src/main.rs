@@ -950,7 +950,7 @@ pub async fn update_assets(
     notify_mml("Checking assets for updates...");
 
     let client = reqwest::Client::new();
-    let mut tasks = FuturesUnordered::<Pin<Box<dyn Future<Output = String>>>>::new();
+    let tasks = FuturesUnordered::<Pin<Box<dyn Future<Output = String>>>>::new();
 
     for (list, base_url) in [
         &asset_config.needed_asset_files,
@@ -1063,8 +1063,10 @@ pub async fn update_assets(
         }
     }
 
+    let mut stream = futures::stream::iter(tasks).buffer_unordered(16);
+
     // Wait for all the downloads to complete
-    while let Some(result) = tasks.next().await {
+    while let Some(result) = stream.next().await {
         info!("{result}");
     }
 
