@@ -795,26 +795,24 @@ pub async fn export_story_to_modpack(
     let img_path = image_file.path().display().to_string();
     if let Some(logo) = logo {
         save_png_best_compression(&logo, &img_path).unwrap();
+        info!("Generating logo AssetBundle");
+        match generate_logo(logo_ab_path.clone(), FPath::new(&img_path).to_path_buf()).await {
+            Ok(_) => {}
+            Err(e) => error!("Failed to generate logo! Default will be used. Err: {e}"),
+        };
     }
 
-    info!("Generating logo AssetBundle"); // TODO Not being properly added, other one is tho
-    match generate_logo(logo_ab_path.clone(), FPath::new(&img_path).to_path_buf()).await {
+    // Encrypt logo AssetBundle, be it the template or newly generated AssetBundle
+    info!("Encrypting new AssetBundle {}", &logo_ab_path);
+
+    let logo_ab_path = FPath::new(&logo_ab_path);
+    match encrypt(logo_ab_path, logo_ab_path) {
         Ok(_) => {
-            // Encrypt new AssetBundle
-
-            info!("Encrypting new AssetBundle {}", &logo_ab_path);
-
-            let logo_ab_path = FPath::new(&logo_ab_path);
-            match encrypt(logo_ab_path, logo_ab_path) {
-                Ok(_) => {
-                    info!("Encrypted AssetBundle")
-                }
-                Err(e) => {
-                    error!("Could not encrypt {}: {}", logo_ab_path.display(), e)
-                }
-            };
+            info!("Encrypted AssetBundle")
         }
-        Err(e) => error!("Failed to generate logo! Default will be used. Err: {e}"),
+        Err(e) => {
+            error!("Could not encrypt {}: {}", logo_ab_path.display(), e)
+        }
     };
 
     let file_name = {
