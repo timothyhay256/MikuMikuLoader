@@ -726,6 +726,16 @@ pub async fn export_story_to_modpack(
         .await
         .unwrap();
 
+    modpack.invalidated_assets.push(InvalidateCacheEntry {
+        resource_path: "event_story/event_whip_2024/screen_image".to_string(),
+        duration: CacheInvalidDuration::PermanentlyInvalid,
+    });
+
+    modpack.injected_assets.insert(
+        "event_story/event_whip_2024/screen_image".to_string(),
+        screen_image_path.clone(),
+    );
+
     info!("Generating screen image");
     match generate_screen_image(
         &screen_image_path,
@@ -736,16 +746,6 @@ pub async fn export_story_to_modpack(
     .await
     {
         Ok(_) => {
-            modpack.invalidated_assets.push(InvalidateCacheEntry {
-                resource_path: "event_story/event_whip_2024/screen_image".to_string(),
-                duration: CacheInvalidDuration::PermanentlyInvalid,
-            });
-
-            modpack.injected_assets.insert(
-                "event_story/event_whip_2024/screen_image".to_string(),
-                screen_image_path.clone(),
-            );
-
             // Encrypt new AssetBundle
 
             info!("Encrypting new AssetBundle {}", &screen_image_path);
@@ -769,6 +769,16 @@ pub async fn export_story_to_modpack(
         .await
         .unwrap();
 
+    modpack.invalidated_assets.push(InvalidateCacheEntry {
+        resource_path: "event/event_whip_2024/logo".to_string(),
+        duration: CacheInvalidDuration::PermanentlyInvalid,
+    });
+
+    modpack.injected_assets.insert(
+        "event/event_whip_2024/logo".to_string(),
+        logo_ab_path.clone(),
+    );
+
     // Save image to temp path since generate_logo requires an path (which is needed because UnityPy requires it)
 
     let logo = {
@@ -787,19 +797,9 @@ pub async fn export_story_to_modpack(
         save_png_best_compression(&logo, &img_path).unwrap();
     }
 
-    info!("Generating logo AssetBundle");
+    info!("Generating logo AssetBundle"); // TODO Not being properly added, other one is tho
     match generate_logo(logo_ab_path.clone(), FPath::new(&img_path).to_path_buf()).await {
         Ok(_) => {
-            modpack.invalidated_assets.push(InvalidateCacheEntry {
-                resource_path: "event/event_whip_2024/logo".to_string(),
-                duration: CacheInvalidDuration::PermanentlyInvalid,
-            });
-
-            modpack.injected_assets.insert(
-                "event/event_whip_2024/logo".to_string(),
-                logo_ab_path.clone(),
-            );
-
             // Encrypt new AssetBundle
 
             info!("Encrypting new AssetBundle {}", &logo_ab_path);

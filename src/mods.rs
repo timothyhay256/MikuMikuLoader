@@ -117,13 +117,17 @@ pub fn reload_injections(config: &Config) -> Result<()> {
                     for injection in mod_data.injected_assets {
                         let new_injection = (injection.0.clone(), injection.1, true);
 
-                        if injection_map
+                        if let Some(i) = injection_map
                             .map
                             .iter()
-                            .any(|existing_injection| existing_injection.0 == injection.0)
+                            .position(|existing_injection| existing_injection.0 == injection.0)
                         {
-                            warn!("Existing injection for {} exists, skipping it", injection.0)
-                        } else if !injection_map.map.contains(&new_injection) {
+                            warn!(
+                                "Existing injection for {} exists, replacing it",
+                                injection.0
+                            );
+                            injection_map.map[i] = new_injection;
+                        } else {
                             injection_map.map.push(new_injection);
                         }
                     }
