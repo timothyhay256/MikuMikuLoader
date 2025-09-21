@@ -3,9 +3,10 @@
 
 `This project is not affiliated with or endorsed by Sega, Colorful Palette, Craft Egg, Crypton Future Media, or Project Sekai. It does not modify the game client, and does not distribute or contain any proprietary game assets. All reverse engineering was performed for interoperability and educational purposes under fair use principles.`
 
-This project requires you to have Python 3 installed when building in order to interface with the UnityPy library, which is used during the final export of a mod. Binaries (will eventually) come with a version of Python.
+This project requires you to have Python 3 and UnityPy installed when building in order to interface with the UnityPy library, which is used during the final export of a mod.
 
-This project is currently usable. It supports injections of simple stories. 
+This project is currently somewhat usable. It supports injections of simple stories, and is currently more an proof of concept.  
+Please see [here](somelink) for an crude usage guide.
 
 #### This is currently a work in progress. See the roadmap below.
 
@@ -22,6 +23,7 @@ This project is currently usable. It supports injections of simple stories.
 - [ ] Full functioning custom stories
 
 ## Stories roadmap
+- [ ] Multi-character-per-scene support
 - [ ] Custom stories
 - [X] Custom story background img/title card
 - [ ] Custom voiceovers
