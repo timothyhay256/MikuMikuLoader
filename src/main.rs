@@ -187,7 +187,7 @@ async fn main() {
     #[cfg(windows)] // Allow Windows users to view colored output
     match ansi_term::enable_ansi_support() {
         Ok(_) => {}
-        Err(e) => {
+        Err(_) => {
             error!("Failed to enable ansi support for Windows cmd, disabling colors.");
             ansi_enabled = false;
         }
