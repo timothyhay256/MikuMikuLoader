@@ -32,7 +32,7 @@ type Aes128CbcEnc = cbc::Encryptor<Aes128>;
 type Aes128CbcDec = cbc::Decryptor<Aes128>;
 
 /// Returns an tuple containing region specific keys used for assetbundle info decryption
-/// All credits to the source of the keys goes to https://github.com/mos9527/sssekai
+/// All credits to the source of the keys goes to <https://github.com/mos9527/sssekai>
 pub fn get_apimanager_keys(lang: &str) -> Option<(&'static [u8], &'static [u8])> {
     match lang {
         "en" => Some((
@@ -178,7 +178,7 @@ pub async fn reload_assetbundle_info(config: &Config, asset_version: &String) ->
     Ok(())
 }
 
-/// Accepts Option<PathBuf> and generates an screen_image assetbundle from it.
+/// Accepts `Option<PathBuf>` and generates an screen_image assetbundle from it.
 /// If an image is not set, it will not be modified, and will be the default in the template.
 /// Requires passing the path as in UnityPy saving from an buffer in memory is incredibly slow
 pub async fn generate_screen_image(
@@ -219,7 +219,7 @@ pub async fn generate_screen_image(
     })
 }
 
-/// Accepts Option<DynamicImage> and generates an logo assetbundle from it
+/// Accepts `Option<DynamicImage>` and generates an logo assetbundle from it
 /// If an image is not set, it will not be modified, and will be the default in the template.
 /// Requires an path since UnityPy only accepts an file path when modifying a sprite.
 pub async fn generate_logo(assetbundle_path: String, logo_path: PathBuf) -> Result<()> {

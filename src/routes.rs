@@ -288,7 +288,7 @@ pub async fn export_story_to_modpack(
 ) -> impl IntoResponse {
     // TODO: Clean up, make more efficient, make this an impl
     // TODO: Apply model transform
-    // debug!("Received story export to modpack request at export_story endpoint: {payload:?}");
+    // TODO: Multi character support
     info!("Exporting story to modpack and generating AssetBundles");
 
     let mod_name = payload.modpack_name;
@@ -333,7 +333,6 @@ pub async fn export_story_to_modpack(
     // Store all characters and their expressions while looping through models to be used later
     let mut character_expressions: Option<HashMap<String, CharacterData>> = None;
 
-    // We don't use an implementation because the CustomStory type is likely to change often, so we just do it all here
     let ModType::Story(adapter) = &mut modpack.mod_type;
 
     // Push the first background
@@ -571,10 +570,6 @@ pub async fn export_story_to_modpack(
                                     }]
                                 }
                             },
-                            // voices: vec![TalkVoice {
-                            //     character2dId: character.id, // TODO: Fill with desired voices
-                            //     ..Default::default()
-                            // }],
                             voices: Vec::new(),
                             whenFinishCloseWindow: {
                                 // TODO: Make configurable
@@ -582,12 +577,6 @@ pub async fn export_story_to_modpack(
                             },
                             ..Default::default()
                         });
-
-                        // TODO: Apply offsets and other relavent data
-                        // adapter.layoutData.push(ScenarioCharacterLayout {
-                        //     character2dId: character_id,
-                        //     ..Default::default()
-                        // })
 
                         let scenario_char_layout = ScenarioCharacterLayout {
                             r#type: if initial_scene { 2 } else { 0 },
