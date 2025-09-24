@@ -32,6 +32,7 @@ use gumdrop::Options;
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use image::ImageReader;
+use indicatif::ProgressBar;
 use local_ip_address::local_ip;
 use log::{debug, error, info, warn};
 #[cfg(not(debug_assertions))]
@@ -947,34 +948,41 @@ pub async fn update_assets(
         asset_version, config.platform
     )];
 
-    notify_mml("Checking assets for updates...");
-
-    let client = reqwest::Client::new();
-    let tasks = FuturesUnordered::<Pin<Box<dyn Future<Output = String>>>>::new();
-
-    for (list, base_url) in [
+    let asset_list = [
         &asset_config.needed_asset_files,
         &asset_config.needed_template_files,
         &asset_config.needed_live2d_files,
         &abinfo_url,
-    ]
-    .iter()
-    .zip([
+    ];
+
+    let request_list = asset_list.iter().zip([
         &asset_config.common_asset_url,
         &asset_config.template_asset_url,
         &asset_config.live2d_asset_url,
         &config.advanced.assetbundle_info_url,
-    ]) {
+    ]);
+
+    let client = reqwest::Client::new();
+    let tasks = FuturesUnordered::<Pin<Box<dyn Future<Output = String>>>>::new();
+
+    let total_requests: u64 = asset_list.iter().map(|files| files.len() as u64).sum();
+
+    let pb = ProgressBar::new(total_requests);
+    notify_mml("Checking assets for updates...");
+
+    for (list, base_url) in request_list {
         let list = *list;
 
         for asset in list {
             let client = client.clone();
             let url = format!("https://{}/{asset}", &base_url.clone());
 
+            let owned_pb = pb.clone();
             tasks.push(Box::pin(async move {
                 let mut skip_download = false;
 
-            info!("Updating {url}");
+            debug!("Updating {url}");
+            owned_pb.inc(1);
 
             let resp_result = client.head(&url).send().await;
             let resp = match resp_result {
@@ -1009,14 +1017,14 @@ pub async fn update_assets(
 
                 if existing_etag_val == new_etag_val.unwrap_or("") {
                     // If it's a None, then just make sure this will eval false.
-                    info!("{} is still up to date.", existing_etag_path.display());
+                    debug!("{} is still up to date.", existing_etag_path.display());
                     skip_download = true;
                     etag_needs_update = false;
                 }
             }
 
             if !skip_download {
-                info!("Downloading {asset}");
+                debug!("Downloading {asset}");
                 let resp = client.get(url).send().await.unwrap();
 
                 // If the asset has parent directory(s), create them
@@ -1067,8 +1075,10 @@ pub async fn update_assets(
 
     // Wait for all the downloads to complete
     while let Some(result) = stream.next().await {
-        info!("{result}");
+        debug!("{result}");
     }
+
+    pb.finish();
 
     info!("Finished updating assets!");
 
