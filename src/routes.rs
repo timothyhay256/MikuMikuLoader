@@ -419,18 +419,25 @@ pub async fn export_story_to_modpack(
         for model in &scene.data.models {
             if model.from == "sekai" {
                 // Extract id by extracting model name from costume
-                let asset_prefix = {
-                    if let Some(pos) = model.model_name.rfind('_') {
-                        if model.model_name[..pos].contains('_') {
-                            &model.model_name[..pos]
-                        } else {
-                            // Just one underscore indicates it doesn't have anything to trim
-                            &model.model_name
-                        }
-                    } else {
-                        // No underscores
+                let asset_prefix = if let Some(pos) = model.model_name.rfind('_') {
+                    let before_last = &model.model_name[..pos];
+
+                    if before_last.contains('_') {
+                        // multiple underscores, return everything before last underscore
+                        before_last
+                    } else if before_last.contains("v2") {
+                        // contains v2 prefix, return whole thing
                         &model.model_name
+                    } else {
+                        // one underscore, no v2 prefix, return part before first underscore
+                        match model.model_name.find('_') {
+                            Some(first_pos) => &model.model_name[..first_pos],
+                            None => &model.model_name,
+                        }
                     }
+                } else {
+                    // No underscores at all
+                    &model.model_name
                 };
 
                 debug!("getting character_id from prefix: {asset_prefix}");

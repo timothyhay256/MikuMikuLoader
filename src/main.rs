@@ -1071,7 +1071,7 @@ pub async fn update_assets(
         }
     }
 
-    let mut stream = futures::stream::iter(tasks).buffer_unordered(16);
+    let mut stream = futures::stream::iter(tasks).buffer_unordered(32);
 
     // Wait for all the downloads to complete
     while let Some(result) = stream.next().await {
