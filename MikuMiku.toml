@@ -1,5 +1,6 @@
 platform = "android"
 region = "en"
+disable_asset_updates = false
 
 # Do not edit beneath this unless you know what you are doing!
 [advanced]

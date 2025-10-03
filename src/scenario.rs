@@ -1,11 +1,12 @@
 use std::{
+    collections::HashMap,
     ffi::CString,
-    fs::copy,
+    fs::{self, copy},
     path::{Path, PathBuf},
 };
 
 use anyhow::Result;
-use log::{error, info};
+use log::{debug, error, info, warn};
 use pyo3::{
     PyResult, Python,
     types::{PyAnyMethods, PyModule},
@@ -17,6 +18,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     encrypt,
     mods::{ModData, ModType},
+    notify_mml,
+    utils::{self, Character2DS, Model3Root},
 };
 
 /// Contains all relevant UnityPy code for loading and exporting a typetree.
@@ -110,6 +113,354 @@ impl Default for Scenario {
             includeSoundDataBundleNames: Vec::new(),
             scenarioSnippetCharacterLayoutModes: vec![ScenarioSnippetLayoutMode::default()],
         }
+    }
+}
+
+impl Scenario {
+    pub fn generate_story_assetbundle(&mut self, payload: &CustomStory) {
+        let mod_name = payload.modpack_name.clone();
+
+        // Store all characters and their expressions while looping through models to be used later
+        let mut character_expressions: Option<HashMap<String, CharacterData>> = None;
+
+        // Load character2ds
+        let character2ds_file = fs::File::open("assets/character2ds.json").expect("Could not read assets/character2ds.json! Please remove the assets folder and try again to redownload assets.");
+
+        let character2ds: Vec<Character2DS> = serde_json::from_reader(character2ds_file).expect(
+            "character2ds.json is not formatted properly! Check if MikuMikuLoader is out of date.",
+        );
+
+        let character2ds_map: HashMap<String, Character2DS> = character2ds
+            .into_iter()
+            .filter_map(|c| c.asset_name.clone().map(|name| (name, c)))
+            .collect();
+
+        // Push the first background
+        let bkg_name = Path::new(&payload.data[0].data.background.clone().to_string())
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_owned();
+
+        debug!("Pushing first background");
+        self.firstBackground = bkg_name.clone();
+
+        self.needBundleNames
+            .push(format!("scenario/background/{bkg_name}"));
+
+        // Push special effect data with story name and (?) MikuMikuLoader
+        self.specialEffectData.push(ScenarioSpecialEffect {
+            effectType: 8,
+            stringVal: "Created with MikuMikuLoader".to_owned(),
+            stringValSub: "".to_owned(),
+            duration: 0.0,
+            intVal: 0,
+        });
+
+        self.specialEffectData.push(ScenarioSpecialEffect {
+            effectType: 8,
+            stringVal: mod_name.to_owned(),
+            stringValSub: "".to_owned(),
+            duration: 0.0,
+            intVal: 0,
+        });
+
+        self.specialEffectData.push(ScenarioSpecialEffect {
+            effectType: 4,
+            stringVal: "".to_owned(),
+            stringValSub: "".to_owned(),
+            duration: 1.0,
+            intVal: 0,
+        });
+
+        // Push necessary ScenarioSnippet for above special effects
+
+        // "MikuMikuLoader" special effect
+        self.snippets.push(ScenarioSnippet {
+            index: 0,
+            action: 6,
+            progressBehavior: 1,
+            referenceIndex: 0,
+            delay: 0.0,
+        });
+
+        // Mod name special effect
+        self.snippets.push(ScenarioSnippet {
+            index: 1,
+            action: 6,
+            progressBehavior: 1,
+            referenceIndex: 1,
+            delay: 0.0,
+        });
+
+        // Clear special effects
+        self.snippets.push(ScenarioSnippet {
+            index: 2,
+            action: 7,
+            progressBehavior: 1,
+            referenceIndex: 0,
+            delay: 0.0,
+        });
+
+        // Have the character appear TODO: Multiple character support
+        self.snippets.push(ScenarioSnippet {
+            index: 3,
+            action: 2,
+            progressBehavior: 1,
+            referenceIndex: 0,
+            delay: 2.0,
+        });
+
+        // Loop through all the scenes to push the relevant data
+        for (index, scene) in payload.data.iter().enumerate() {
+            let initial_scene = { index == 0 };
+            // Populate appear_characters, and use the grabbed id to populate talk_data at the same time
+            for model in &scene.data.models {
+                if model.from == "sekai" {
+                    // Extract id by extracting model name from costume
+                    let asset_prefix = if let Some(pos) = model.model_name.rfind('_') {
+                        let before_last = &model.model_name[..pos];
+
+                        if before_last.contains('_') {
+                            // multiple underscores, return everything before last underscore
+                            before_last
+                        } else if before_last.contains("v2") {
+                            // contains v2 prefix, return whole thing
+                            &model.model_name
+                        } else {
+                            // one underscore, no v2 prefix, return part before first underscore
+                            match model.model_name.find('_') {
+                                Some(first_pos) => &model.model_name[..first_pos],
+                                None => &model.model_name,
+                            }
+                        }
+                    } else {
+                        // No underscores at all
+                        &model.model_name
+                    };
+
+                    debug!("getting character_id from prefix: {asset_prefix}");
+
+                    let character_id = character2ds_map
+                        .get(asset_prefix)
+                        .expect("missing character")
+                        .id;
+
+                    debug!("Setting character_id to {character_id}");
+
+                    // Use BuildMotionData to determine the expression and pose, since SEKAI-Stories uses an index in the serialized JSON
+                    character_expressions.get_or_insert_with(HashMap::new).insert(model.character.clone(), {
+                    let char_map = utils::build_character_map();
+
+                    if let Some(full_id) = char_map.get(&model.character) {
+
+                        // Get pose and expression name from SEKAI-Stories index
+                        let character_motions_path =
+                            format!("assets/public/live2d/model/{}/{}/{}.model3.json", full_id.replace("_", ""), model.model_name, model.model_name);
+
+                        debug!("Trying to read build motion data from {character_motions_path}");
+
+                        let character_motions_file = fs::File::open(&character_motions_path).unwrap_or_else(|_| panic!("Could not read {}! Please remove the assets folder and try again to redownload assets.", &character_motions_path));
+
+                        let character_motions: Model3Root = serde_json::from_reader(
+                            character_motions_file,
+                        ).unwrap();
+
+                        // Collect just the keys
+                        let mut character_motions: Vec<&String> = character_motions.file_references.motions.keys().collect();
+
+                        // SEKAI-Stories has a bug(?) where v2_20mizuki_casual has face_sleepy_03, despite not being referanced in any model files for Mizuki, so it has to be inserted.
+                        let missing_motion = &"face_sleepy_03".to_string();
+                        if model.model_name == "v2_20mizuki_casual" {
+                            debug!("Inserting face_sleepy_03 to account for SEKAI-Stories");
+
+                            let insert_index = character_motions.iter().position(|&p| p == "face_sleepy_02").unwrap();
+
+                            character_motions.insert(insert_index + 1, missing_motion);
+                        }
+
+                        // Grabs pose name
+                        let result_pose = match character_motions.get(model.model_pose as usize) {
+                            Some(result_pose) => *result_pose,
+                            None => {
+                                warn!("Could not find any matching result_pose inside {character_motions_path}, using w-adult-blushed01!");
+                                &"w-adult-blushed01".to_string()
+                            }
+                        };
+
+                        // Get index of first key containing "face_", as this is how SEKAI-Stories does its indexing
+
+                        let result_expression = match character_motions.iter().position(|k| k.contains("face_")) {
+                            Some(idx) => match character_motions.get(idx + (model.model_expression - 1) as usize) {
+                                Some(result_expression) => *result_expression,
+                                None => {
+                                    warn!("Could not find any matching result_expression inside {character_motions_path}, using face_cry_01!");
+                                    &"face_cry_01".to_string()
+                                }
+                            },
+                            None => {
+                                warn!("{character_motions_path}, contains no face_*! This should never happen, using face_cry_01!");
+                                &"face_cry_01".to_string()
+                            }
+                        };
+
+                        let char_data = CharacterData {
+                            id: character_id,
+                            motion_name: result_pose.to_owned(),
+                            facial_name: result_expression.to_owned(),
+                            costume_type: model.model_name.clone(),
+                        };
+
+                        debug!("Inserting the following CharacterData: {char_data:?}");
+                        char_data
+                    } else {
+                        error!(
+                            "Could not find character {}! Please create a bug report. The expression will be replaced with face_cry_01, and the pose will be replaced with w-cute-glad01",
+                            "face_cry_01"
+                        );
+
+                        CharacterData {
+                            id: 286,
+                            motion_name: "w-cute-glad01".to_string(),
+                            facial_name: "face_cry_01".to_string(),
+                            costume_type: "v2_09kohane_casual".to_string(),
+                        }
+                    }
+                });
+
+                    let character_to_push = crate::scenario::ScenarioAppearCharacters {
+                        character2dId: character_id,
+                        costumeType: model.model_name.clone(),
+                    };
+
+                    if !self.appearCharacters.contains(&character_to_push) {
+                        debug!("Pushing appearCharacters: {character_to_push:?}");
+                        self // Push character to appear_characters
+                            .appearCharacters
+                            .push(character_to_push);
+                    }
+                } else {
+                    error!(
+                        "Only characters from Project Sekai are currently supported! Skipping {}",
+                        model.character
+                    );
+                    notify_mml(
+                        "Found a non-Sekai character in cust story. Only characters from Project Sekai are currently supported!",
+                    );
+                }
+            }
+
+            // Apply text and stories
+            let character_name = &scene.data.text.name_tag.to_lowercase();
+
+            match character_expressions {
+                Some(ref character_expressions) => {
+                    match character_expressions.get(character_name) {
+                        Some(character) => {
+                            self.talkData.push(ScenarioTalkData {
+                                // Push character to talk_data (which will have other fields filled later)
+                                talkCharacters: vec![TalkCharacter {
+                                    character2dId: character.id,
+                                }],
+                                windowDisplayName: capitalize(character_name),
+                                body: scene.data.text.dialogue.clone(),
+                                motions: {
+                                    if initial_scene {
+                                        Vec::new()
+                                    } else {
+                                        vec![TalkMotion {
+                                            motionName: character.motion_name.clone(),
+                                            facialName: character.facial_name.clone(),
+                                            character2dId: character.id,
+                                            ..Default::default()
+                                        }]
+                                    }
+                                },
+                                voices: Vec::new(),
+                                whenFinishCloseWindow: {
+                                    // TODO: Make configurable
+                                    if index == payload.data.len() { 1 } else { 0 }
+                                },
+                                ..Default::default()
+                            });
+
+                            let scenario_char_layout = ScenarioCharacterLayout {
+                                r#type: if initial_scene { 2 } else { 0 },
+                                sideFrom: if initial_scene { 4 } else { 3 },
+                                sideFromOffsetX: 0.0,
+                                sideTo: if initial_scene { 4 } else { 3 },
+                                sideToOffsetX: 0.0,
+                                depthType: 0,
+                                character2dId: character.id,
+                                costumeType: if initial_scene {
+                                    character.costume_type.clone()
+                                } else {
+                                    "".to_owned()
+                                },
+                                motionName: character.motion_name.clone(),
+                                facialName: character.facial_name.clone(),
+                                moveSpeedType: 0,
+                            };
+
+                            self.layoutData.push(scenario_char_layout);
+
+                            // If it's the last scene, we need to push an empty layoutdata. Not sure why.
+                            if index == payload.data.len() - 1 {
+                                debug!(
+                                    "Pushing final needed empty ScenarioSnippetCharacterLayout!"
+                                );
+
+                                self.layoutData.push(ScenarioCharacterLayout {
+                                    r#type: 3,
+                                    sideFrom: 4,
+                                    sideFromOffsetX: 0.0,
+                                    sideTo: 4,
+                                    sideToOffsetX: 0.0,
+                                    depthType: 0,
+                                    character2dId: character.id,
+                                    costumeType: "".to_owned(),
+                                    motionName: "".to_owned(),
+                                    facialName: "".to_owned(),
+                                    moveSpeedType: 0,
+                                })
+                            }
+                            // match self.layoutData.contains(&scenario_char_layout) {
+                            //     true => {}
+                            //     false => self.layoutData.push(scenario_char_layout),
+                            // };
+
+                            // Push an ScenarioSnippet for our dialogue
+                            self.snippets.push(ScenarioSnippet {
+                                index: self.snippets.len() as i32,
+                                action: 1,
+                                progressBehavior: 1,
+                                referenceIndex: index as i32,
+                                delay: 2.0,
+                            });
+                        }
+                        None => {
+                            error!(
+                                "Could not find {character_name} in {character_expressions:?}! Please file a bug report. Default character will be used."
+                            );
+                            self.talkData.push(ScenarioTalkData::default())
+                        }
+                    }
+                }
+                None => {
+                    error!(
+                        "No characters were correctly initialized in the last step. Tried to find {character_name} but character_expressions is None"
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
     }
 }
 
@@ -497,7 +848,7 @@ pub fn create_assetbundle(
     copy("assets/story/scenario/scenario", mod_ab_path.clone())?; // TODO: Don't hardcode
 
     match modpack.mod_type {
-        ModType::Story(scenario_adapter) => Python::attach(|py| {
+        ModType::Story(scenario_self) => Python::attach(|py| {
             let filename = CString::new("story_to_assetbundle.py").unwrap();
             let modname = CString::new("story_to_assetbundle").unwrap();
 
@@ -516,7 +867,7 @@ pub fn create_assetbundle(
 
             module
                 .getattr("save_typetree")?
-                .call1((pythonize(py, &scenario_adapter)?,))?;
+                .call1((pythonize(py, &scenario_self)?,))?;
 
             if encrypt_ab {
                 info!("Encrypting new AssetBundle {}", mod_ab_path.display());

@@ -8,6 +8,7 @@ pub struct Config {
     pub advanced: AdvancedConfig,
     pub platform: String,
     pub region: String,
+    pub disable_asset_updates: Option<bool>,
 }
 
 impl Default for Config {
@@ -16,6 +17,7 @@ impl Default for Config {
             advanced: AdvancedConfig::default(),
             platform: "android".to_string(),
             region: "en".to_string(),
+            disable_asset_updates: Some(false),
         }
     }
 }
@@ -48,6 +50,19 @@ pub struct AssetConfig {
     pub needed_asset_files: Vec<String>,
     pub needed_template_files: Vec<String>,
     pub needed_live2d_files: Vec<String>,
+}
+
+#[allow(dead_code)] // Not all items will be used, but all are required for deserialization
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Character2DS {
+    pub id: i32,
+    pub character_type: String,
+    pub is_next_grade: bool,
+    pub character_id: i32,
+    pub unit: String,
+    pub is_enabled_flip_display: bool,
+    pub asset_name: Option<String>,
 }
 
 const COMMON_ASSET_URL: &str =

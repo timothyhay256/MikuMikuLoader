@@ -1,5 +1,7 @@
 use std::{
     ffi::CString,
+    fs::{self, File},
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -16,10 +18,6 @@ use pyo3::{
 };
 use rand::Rng;
 use serde::Serialize;
-use tokio::{
-    fs::File,
-    io::{AsyncReadExt, AsyncWriteExt},
-};
 use walkdir::WalkDir;
 
 use crate::{
@@ -67,7 +65,7 @@ pub fn decrypt_aes_cbc(encrypted: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8
 /// in case of permanently invalid hash and
 /// FakePlaceholderHash0000000000000
 /// as the "new" hash
-pub async fn reload_assetbundle_info(config: &Config, asset_version: &String) -> Result<()> {
+pub fn reload_assetbundle_info(config: &Config, asset_version: &String) -> Result<()> {
     let mod_path = Path::new("mods");
 
     let assetbundle_info_path = &format!(
@@ -76,12 +74,11 @@ pub async fn reload_assetbundle_info(config: &Config, asset_version: &String) ->
     );
 
     debug!("reading {assetbundle_info_path}");
-    let mut assetbundle_info = File::open(assetbundle_info_path).await?;
+    let mut assetbundle_info = File::open(assetbundle_info_path)?;
 
     let mut byte_buffer = Vec::new();
     assetbundle_info
         .read_to_end(&mut byte_buffer)
-        .await
         .context("Reading assetbundle info file")?;
 
     let key = get_apimanager_keys(&config.region).unwrap();
@@ -96,7 +93,7 @@ pub async fn reload_assetbundle_info(config: &Config, asset_version: &String) ->
                 if entry.file_type().is_file()
                     && entry.path().extension().and_then(|e| e.to_str()) == Some("toml")
                 {
-                    let entry_data = tokio::fs::read_to_string(entry.path()).await.unwrap_or_else(|_| {
+                    let entry_data = fs::read_to_string(entry.path()).unwrap_or_else(|_| {
                             panic!(
                                 "Could not read {}! Please try redownloading mods and fixing permissions.",
                                 entry.path().display()
@@ -166,14 +163,13 @@ pub async fn reload_assetbundle_info(config: &Config, asset_version: &String) ->
     let encrypted_abinfo = encrypt_aes_cbc(&buf, key.0, key.1)?;
 
     // Recreate the assetbundle info with newly invalid hashes
-    let mut assetbundle_info = File::create(&format!(
+    let mut assetbundle_info = File::create(format!(
         "{}/api/version/{}/os/{}",
         config.advanced.assets.asset_path, asset_version, config.platform
-    ))
-    .await?;
-    assetbundle_info.write_all(&encrypted_abinfo).await?;
+    ))?;
+    assetbundle_info.write_all(&encrypted_abinfo)?;
 
-    assetbundle_info.flush().await?;
+    assetbundle_info.flush()?;
 
     Ok(())
 }
@@ -181,7 +177,7 @@ pub async fn reload_assetbundle_info(config: &Config, asset_version: &String) ->
 /// Accepts `Option<PathBuf>` and generates an screen_image assetbundle from it.
 /// If an image is not set, it will not be modified, and will be the default in the template.
 /// Requires passing the path as in UnityPy saving from an buffer in memory is incredibly slow
-pub async fn generate_screen_image(
+pub fn generate_screen_image(
     assetbundle_path: &String,
     banner_event_story: Option<PathBuf>,
     story_bg: Option<PathBuf>,
@@ -222,7 +218,7 @@ pub async fn generate_screen_image(
 /// Accepts `Option<DynamicImage>` and generates an logo assetbundle from it
 /// If an image is not set, it will not be modified, and will be the default in the template.
 /// Requires an path since UnityPy only accepts an file path when modifying a sprite.
-pub async fn generate_logo(assetbundle_path: String, logo_path: PathBuf) -> Result<()> {
+pub fn generate_logo(assetbundle_path: String, logo_path: PathBuf) -> Result<()> {
     Python::attach(|py| {
         let filename = CString::new("story_to_assetbundle.py").unwrap();
         let modname = CString::new("story_to_assetbundle").unwrap();

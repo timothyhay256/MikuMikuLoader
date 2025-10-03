@@ -46,6 +46,7 @@ base64 = "0.22.1"
 tempfile = "3.23.0"
 indicatif = "0.18.0"
 webbrowser = "1.0.5"
+console-subscriber = "0.4.1"
 
 [build-dependencies]
 serde = { version = "1.0.228", features = ["derive"] }

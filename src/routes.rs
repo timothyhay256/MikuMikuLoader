@@ -21,12 +21,15 @@ use image::{
     load_from_memory,
 };
 use local_ip_address::local_ip;
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use sekai_injector::{
     CertificateGenParams, Manager, RequestParams, generate_ca, new_self_signed_cert,
 };
 use serde::Deserialize;
-use tokio::sync::RwLock;
+use tokio::{
+    sync::RwLock,
+    task::{self, spawn_blocking},
+};
 use walkdir::WalkDir;
 
 use crate::{
@@ -34,13 +37,8 @@ use crate::{
     assetbundle::{generate_logo, generate_screen_image, reload_assetbundle_info},
     encrypt,
     mods::{CacheInvalidDuration, InvalidateCacheEntry, ModData, ModType, reload_injections},
-    notify_mml,
-    scenario::{
-        CharacterData, CustomStory, SCENARIO_PATH_ID, ScenarioCharacterLayout, ScenarioSnippet,
-        ScenarioSpecialEffect, ScenarioTalkData, TalkCharacter, TalkMotion, create_assetbundle,
-        load_scenario_typetree,
-    },
-    utils::{self, Model3Root},
+    scenario::{CustomStory, SCENARIO_PATH_ID, create_assetbundle, load_scenario_typetree},
+    utils::{self},
 };
 
 #[derive(Debug, Deserialize)]
@@ -60,19 +58,6 @@ pub struct CAGenOptions {
     pub ca_lifetime: i64,
     pub ca_file_name: String,
     pub ca_key_name: String,
-}
-
-#[allow(dead_code)] // Not all items will be used, but all are required for deserialization
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Character2DS {
-    id: i32,
-    character_type: String,
-    is_next_grade: bool,
-    character_id: i32,
-    unit: String,
-    is_enabled_flip_display: bool,
-    asset_name: Option<String>,
 }
 
 // TODO: Use SSE and channels
@@ -291,20 +276,14 @@ pub async fn export_story_to_modpack(
     // TODO: Multi character support
     info!("Exporting story to modpack and generating AssetBundles");
 
-    let mod_name = payload.modpack_name;
-    let mod_ab_path = &format!("mods/{mod_name}.ab");
-
-    // Load character2ds
-    let character2ds_file = fs::File::open("assets/character2ds.json").expect("Could not read assets/character2ds.json! Please remove the assets folder and try again to redownload assets.");
-
-    let character2ds: Vec<Character2DS> = serde_json::from_reader(character2ds_file).expect(
-        "character2ds.json is not formatted properly! Check if MikuMikuLoader is out of date.",
-    );
-
-    let character2ds_map: HashMap<String, Character2DS> = character2ds
-        .into_iter()
-        .filter_map(|c| c.asset_name.clone().map(|name| (name, c)))
-        .collect();
+    // payload will be moved into closure, so we need to clone what we need now
+    let mod_name = payload.modpack_name.clone();
+    let payload_file_name = payload.file_name.clone();
+    let payload_logo = payload.logo.clone();
+    let payload_story_background = payload.story_background.clone();
+    let payload_title_background = payload.title_background.clone();
+    let payload_banner_image = payload.banner_image.clone();
+    let mod_ab_path = format!("mods/{mod_name}.ab");
 
     let mut injected_assets = HashMap::new();
     injected_assets.insert(
@@ -318,341 +297,22 @@ pub async fn export_story_to_modpack(
         Err(e) => return format!("Failed to load typetree. Is UnityPy installed? Err: {e}"),
     };
 
-    let mut modpack = ModData {
-        mod_name: mod_name.clone(),
-        enabled: true,
-        mod_type: crate::mods::ModType::Story(scenario_typetree),
-        // TODO: Change resource_path and duration
-        invalidated_assets: vec![InvalidateCacheEntry {
-            resource_path: "event_story/event_whip_2024/scenario".to_string(),
-            duration: CacheInvalidDuration::PermanentlyInvalid,
-        }],
-        injected_assets,
-    };
+    let mut modpack = task::spawn_blocking(move || {
+        let mut modpack = ModData {
+            mod_name: payload.modpack_name.clone(),
+            enabled: true,
+            mod_type: crate::mods::ModType::Story(scenario_typetree),
+            invalidated_assets: Vec::new(),
+            injected_assets,
+        };
+        let ModType::Story(adapter) = &mut modpack.mod_type;
 
-    // Store all characters and their expressions while looping through models to be used later
-    let mut character_expressions: Option<HashMap<String, CharacterData>> = None;
+        adapter.generate_story_assetbundle(&payload);
 
-    let ModType::Story(adapter) = &mut modpack.mod_type;
-
-    // Push the first background
-    let bkg_name = fPath::new(&payload.data[0].data.background.clone().to_string())
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .to_owned();
-
-    debug!("Pushing first background");
-    adapter.firstBackground = bkg_name.clone();
-
-    adapter
-        .needBundleNames
-        .push(format!("scenario/background/{bkg_name}"));
-
-    // Push special effect data with story name and (?) MikuMikuLoader
-    adapter.specialEffectData.push(ScenarioSpecialEffect {
-        effectType: 8,
-        stringVal: "Created with MikuMikuLoader".to_owned(),
-        stringValSub: "".to_owned(),
-        duration: 0.0,
-        intVal: 0,
-    });
-
-    adapter.specialEffectData.push(ScenarioSpecialEffect {
-        effectType: 8,
-        stringVal: mod_name.to_owned(),
-        stringValSub: "".to_owned(),
-        duration: 0.0,
-        intVal: 0,
-    });
-
-    adapter.specialEffectData.push(ScenarioSpecialEffect {
-        effectType: 4,
-        stringVal: "".to_owned(),
-        stringValSub: "".to_owned(),
-        duration: 1.0,
-        intVal: 0,
-    });
-
-    // Push necessary ScenarioSnippet for above special effects
-
-    // "MikuMikuLoader" special effect
-    adapter.snippets.push(ScenarioSnippet {
-        index: 0,
-        action: 6,
-        progressBehavior: 1,
-        referenceIndex: 0,
-        delay: 0.0,
-    });
-
-    // Mod name special effect
-    adapter.snippets.push(ScenarioSnippet {
-        index: 1,
-        action: 6,
-        progressBehavior: 1,
-        referenceIndex: 1,
-        delay: 0.0,
-    });
-
-    // Clear special effects
-    adapter.snippets.push(ScenarioSnippet {
-        index: 2,
-        action: 7,
-        progressBehavior: 1,
-        referenceIndex: 0,
-        delay: 0.0,
-    });
-
-    // Have the character appear TODO: Multiple character support
-    adapter.snippets.push(ScenarioSnippet {
-        index: 3,
-        action: 2,
-        progressBehavior: 1,
-        referenceIndex: 0,
-        delay: 2.0,
-    });
-
-    // Loop through all the scenes to push the relevant data
-    for (index, scene) in payload.data.iter().enumerate() {
-        let initial_scene = { index == 0 };
-        // Populate appear_characters, and use the grabbed id to populate talk_data at the same time
-        for model in &scene.data.models {
-            if model.from == "sekai" {
-                // Extract id by extracting model name from costume
-                let asset_prefix = if let Some(pos) = model.model_name.rfind('_') {
-                    let before_last = &model.model_name[..pos];
-
-                    if before_last.contains('_') {
-                        // multiple underscores, return everything before last underscore
-                        before_last
-                    } else if before_last.contains("v2") {
-                        // contains v2 prefix, return whole thing
-                        &model.model_name
-                    } else {
-                        // one underscore, no v2 prefix, return part before first underscore
-                        match model.model_name.find('_') {
-                            Some(first_pos) => &model.model_name[..first_pos],
-                            None => &model.model_name,
-                        }
-                    }
-                } else {
-                    // No underscores at all
-                    &model.model_name
-                };
-
-                debug!("getting character_id from prefix: {asset_prefix}");
-
-                let character_id = character2ds_map
-                    .get(asset_prefix)
-                    .expect("missing character")
-                    .id;
-
-                debug!("Setting character_id to {character_id}");
-
-                // Use BuildMotionData to determine the expression and pose, since SEKAI-Stories uses an index in the serialized JSON
-                character_expressions.get_or_insert_with(HashMap::new).insert(model.character.clone(), {
-                    let char_map = utils::build_character_map();
-
-                    if let Some(full_id) = char_map.get(&model.character) {
-
-                        // Get pose and expression name from SEKAI-Stories index
-                        let character_motions_path =
-                            format!("assets/public/live2d/model/{}/{}/{}.model3.json", full_id.replace("_", ""), model.model_name, model.model_name);
-
-                        debug!("Trying to read build motion data from {character_motions_path}");
-
-                        let character_motions_file = fs::File::open(&character_motions_path).unwrap_or_else(|_| panic!("Could not read {}! Please remove the assets folder and try again to redownload assets.", &character_motions_path));
-
-                        let character_motions: Model3Root = serde_json::from_reader(
-                            character_motions_file,
-                        ).unwrap();
-
-                        // Collect just the keys
-                        let mut character_motions: Vec<&String> = character_motions.file_references.motions.keys().collect();
-
-                        // SEKAI-Stories has a bug(?) where v2_20mizuki_casual has face_sleepy_03, despite not being referanced in any model files for Mizuki, so it has to be inserted.
-                        let missing_motion = &"face_sleepy_03".to_string();
-                        if model.model_name == "v2_20mizuki_casual" {
-                            debug!("Inserting face_sleepy_03 to account for SEKAI-Stories");
-
-                            let insert_index = character_motions.iter().position(|&p| p == "face_sleepy_02").unwrap();
-
-                            character_motions.insert(insert_index + 1, missing_motion);
-                        }
-
-                        // Grabs pose name
-                        let result_pose = match character_motions.get(model.model_pose as usize) {
-                            Some(result_pose) => *result_pose,
-                            None => {
-                                warn!("Could not find any matching result_pose inside {character_motions_path}, using w-adult-blushed01!");
-                                &"w-adult-blushed01".to_string()
-                            }
-                        };
-
-                        // Get index of first key containing "face_", as this is how SEKAI-Stories does its indexing
-
-                        let result_expression = match character_motions.iter().position(|k| k.contains("face_")) {
-                            Some(idx) => match character_motions.get(idx + (model.model_expression - 1) as usize) {
-                                Some(result_expression) => *result_expression,
-                                None => {
-                                    warn!("Could not find any matching result_expression inside {character_motions_path}, using face_cry_01!");
-                                    &"face_cry_01".to_string()
-                                }
-                            },
-                            None => {
-                                warn!("{character_motions_path}, contains no face_*! This should never happen, using face_cry_01!");
-                                &"face_cry_01".to_string()
-                            }
-                        };
-
-                        let char_data = CharacterData {
-                            id: character_id,
-                            motion_name: result_pose.to_owned(),
-                            facial_name: result_expression.to_owned(),
-                            costume_type: model.model_name.clone(),
-                        };
-
-                        debug!("Inserting the following CharacterData: {char_data:?}");
-                        char_data
-                    } else {
-                        error!(
-                            "Could not find character {}! Please create a bug report. The expression will be replaced with face_cry_01, and the pose will be replaced with w-cute-glad01",
-                            "face_cry_01"
-                        );
-
-                        CharacterData {
-                            id: 286,
-                            motion_name: "w-cute-glad01".to_string(),
-                            facial_name: "face_cry_01".to_string(),
-                            costume_type: "v2_09kohane_casual".to_string(),
-                        }
-                    }
-                });
-
-                let character_to_push = crate::scenario::ScenarioAppearCharacters {
-                    character2dId: character_id,
-                    costumeType: model.model_name.clone(),
-                };
-
-                if !adapter.appearCharacters.contains(&character_to_push) {
-                    debug!("Pushing appearCharacters: {character_to_push:?}");
-                    adapter // Push character to appear_characters
-                        .appearCharacters
-                        .push(character_to_push);
-                }
-            } else {
-                error!(
-                    "Only characters from Project Sekai are currently supported! Skipping {}",
-                    model.character
-                );
-                notify_mml(
-                    "Found a non-Sekai character in cust story. Only characters from Project Sekai are currently supported!",
-                );
-            }
-        }
-
-        // Apply text and stories
-        let character_name = &scene.data.text.name_tag.to_lowercase();
-
-        match character_expressions {
-            Some(ref character_expressions) => {
-                match character_expressions.get(character_name) {
-                    Some(character) => {
-                        adapter.talkData.push(ScenarioTalkData {
-                            // Push character to talk_data (which will have other fields filled later)
-                            talkCharacters: vec![TalkCharacter {
-                                character2dId: character.id,
-                            }],
-                            windowDisplayName: capitalize(character_name),
-                            body: scene.data.text.dialogue.clone(),
-                            motions: {
-                                if initial_scene {
-                                    Vec::new()
-                                } else {
-                                    vec![TalkMotion {
-                                        motionName: character.motion_name.clone(),
-                                        facialName: character.facial_name.clone(),
-                                        character2dId: character.id,
-                                        ..Default::default()
-                                    }]
-                                }
-                            },
-                            voices: Vec::new(),
-                            whenFinishCloseWindow: {
-                                // TODO: Make configurable
-                                if index == payload.data.len() { 1 } else { 0 }
-                            },
-                            ..Default::default()
-                        });
-
-                        let scenario_char_layout = ScenarioCharacterLayout {
-                            r#type: if initial_scene { 2 } else { 0 },
-                            sideFrom: if initial_scene { 4 } else { 3 },
-                            sideFromOffsetX: 0.0,
-                            sideTo: if initial_scene { 4 } else { 3 },
-                            sideToOffsetX: 0.0,
-                            depthType: 0,
-                            character2dId: character.id,
-                            costumeType: if initial_scene {
-                                character.costume_type.clone()
-                            } else {
-                                "".to_owned()
-                            },
-                            motionName: character.motion_name.clone(),
-                            facialName: character.facial_name.clone(),
-                            moveSpeedType: 0,
-                        };
-
-                        adapter.layoutData.push(scenario_char_layout);
-
-                        // If it's the last scene, we need to push an empty layoutdata. Not sure why.
-                        if index == payload.data.len() - 1 {
-                            debug!("Pushing final needed empty ScenarioSnippetCharacterLayout!");
-
-                            adapter.layoutData.push(ScenarioCharacterLayout {
-                                r#type: 3,
-                                sideFrom: 4,
-                                sideFromOffsetX: 0.0,
-                                sideTo: 4,
-                                sideToOffsetX: 0.0,
-                                depthType: 0,
-                                character2dId: character.id,
-                                costumeType: "".to_owned(),
-                                motionName: "".to_owned(),
-                                facialName: "".to_owned(),
-                                moveSpeedType: 0,
-                            })
-                        }
-                        // match adapter.layoutData.contains(&scenario_char_layout) {
-                        //     true => {}
-                        //     false => adapter.layoutData.push(scenario_char_layout),
-                        // };
-
-                        // Push an ScenarioSnippet for our dialogue
-                        adapter.snippets.push(ScenarioSnippet {
-                            index: adapter.snippets.len() as i32,
-                            action: 1,
-                            progressBehavior: 1,
-                            referenceIndex: index as i32,
-                            delay: 2.0,
-                        });
-                    }
-                    None => {
-                        error!(
-                            "Could not find {character_name} in {character_expressions:?}! Please file a bug report. Default character will be used."
-                        );
-                        adapter.talkData.push(ScenarioTalkData::default())
-                    }
-                }
-            }
-            None => {
-                error!(
-                    "No characters were correctly initialized in the last step. Tried to find {character_name} but character_expressions is None"
-                );
-                return "No compatible characters could be found. Please make sure all chracters in each scene are Project Sekai characters! Support for non-Sekai characters is not yet implemented.".to_string();
-            }
-        }
-    }
+        modpack
+    })
+    .await
+    .expect("generate_story_assetbundle blocking task failed");
 
     info!("Creating associated AssetBundles...");
 
@@ -660,61 +320,67 @@ pub async fn export_story_to_modpack(
 
     // Deleted when dropped, thus we need it here
     let banner_image_tmp_file = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
-    let banner_image = {
-        match png_from_base64_str(payload.banner_image) {
-            Ok(img) => {
-                if let Some(image) = img {
-                    let img_path = banner_image_tmp_file.path().display().to_string();
-                    save_png_best_compression(&image, &img_path).unwrap();
-                    Some(FPath::new(&img_path).to_path_buf())
-                } else {
-                    None
-                }
-            }
-            Err(e) => {
-                return format!("Banner image provided is not an valid image! Err: {e}")
-                    .to_string();
+    let banner_image = spawn_blocking(move || match png_from_base64_str(&payload_banner_image) {
+        Ok(img) => {
+            if let Some(image) = img {
+                let img_path = banner_image_tmp_file.path().display().to_string();
+                save_png_best_compression(&image, &img_path).unwrap();
+                Some(FPath::new(&img_path).to_path_buf())
+            } else {
+                None
             }
         }
-    };
+        Err(e) => {
+            error!("Banner image provided is not an valid image! Err: {e}");
+            None
+        }
+    })
+    .await
+    .expect("banner image from base64 blocking task failed");
 
     let story_background_tmp_file = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
-    let story_background = {
-        match png_from_base64_str(payload.story_background) {
-            Ok(img) => {
-                if let Some(image) = img {
-                    let img_path = story_background_tmp_file.path().display().to_string();
-                    save_png_best_compression(&image, &img_path).unwrap();
-                    Some(FPath::new(&img_path).to_path_buf())
-                } else {
+    let story_background =
+        spawn_blocking(
+            move || match png_from_base64_str(&payload_story_background) {
+                Ok(img) => {
+                    if let Some(image) = img {
+                        let img_path = story_background_tmp_file.path().display().to_string();
+                        save_png_best_compression(&image, &img_path).unwrap();
+                        Some(FPath::new(&img_path).to_path_buf())
+                    } else {
+                        None
+                    }
+                }
+                Err(e) => {
+                    error!("Banner image provided is not an valid image! Err: {e}");
                     None
                 }
-            }
-            Err(e) => {
-                return format!("Banner image provided is not an valid image! Err: {e}")
-                    .to_string();
-            }
-        }
-    };
+            },
+        )
+        .await
+        .expect("story background image from base64 blocking task failed");
 
     let title_background_tmp_file = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
-    let title_background = {
-        match png_from_base64_str(payload.title_background) {
-            Ok(img) => {
-                if let Some(image) = img {
-                    let img_path = title_background_tmp_file.path().display().to_string();
-                    save_png_best_compression(&image, &img_path).unwrap();
-                    Some(FPath::new(&img_path).to_path_buf())
-                } else {
+    let title_background =
+        spawn_blocking(
+            move || match png_from_base64_str(&payload_title_background) {
+                Ok(img) => {
+                    if let Some(image) = img {
+                        let img_path = title_background_tmp_file.path().display().to_string();
+                        save_png_best_compression(&image, &img_path).unwrap();
+                        Some(FPath::new(&img_path).to_path_buf())
+                    } else {
+                        None
+                    }
+                }
+                Err(e) => {
+                    error!("Banner image provided is not an valid image! Err: {e}");
                     None
                 }
-            }
-            Err(e) => {
-                return format!("Banner image provided is not an valid image! Err: {e}")
-                    .to_string();
-            }
-        }
-    };
+            },
+        )
+        .await
+        .expect("title background image from base64 blocking task failed");
 
     // Copy template and generate new screen_image assetbundle in place of the copied original assetbundle
     let screen_image_path = format!("mods/{mod_name}-screenImage.ab");
@@ -732,170 +398,171 @@ pub async fn export_story_to_modpack(
         screen_image_path.clone(),
     );
 
-    info!("Generating screen image");
-    match generate_screen_image(
-        &screen_image_path,
-        banner_image,
-        story_background,
-        title_background,
-    )
-    .await
-    {
-        Ok(_) => {
-            // Encrypt new AssetBundle
+    spawn_blocking(move || {
+        info!("Generating screen image");
+        match generate_screen_image(
+            &screen_image_path,
+            banner_image,
+            story_background,
+            title_background,
+        ) {
+            Ok(_) => {
+                // Encrypt new AssetBundle
 
-            info!("Encrypting new AssetBundle {}", &screen_image_path);
+                info!("Encrypting new AssetBundle {}", &screen_image_path);
 
-            let screen_image_path = FPath::new(&screen_image_path);
-            match encrypt(screen_image_path, screen_image_path) {
-                Ok(_) => {
-                    info!("Encrypted AssetBundle")
-                }
+                let screen_image_path = FPath::new(&screen_image_path);
+                match encrypt(screen_image_path, screen_image_path) {
+                    Ok(_) => {
+                        info!("Encrypted AssetBundle")
+                    }
+                    Err(e) => {
+                        error!("Could not encrypt {}: {}", screen_image_path.display(), e)
+                    }
+                };
+            }
+            Err(e) => error!("Failed to generate screen_image! Default will be used. Err: {e}"),
+        };
+
+        // Copy template and generate new logo assetbundle in place of the copied original assetbundle
+        let logo_ab_path = format!("mods/{mod_name}-logo.ab");
+        fs::copy("assets/event/logo/logo", &logo_ab_path)
+            .unwrap();
+
+        modpack.invalidated_assets.push(InvalidateCacheEntry {
+            resource_path: "event/event_whip_2024/logo".to_string(),
+            duration: CacheInvalidDuration::PermanentlyInvalid,
+        });
+
+        modpack.injected_assets.insert(
+            "event/event_whip_2024/logo".to_string(),
+            logo_ab_path.clone(),
+        );
+
+        // Save image to temp path since generate_logo requires an path (which is needed because UnityPy requires it)
+
+        let logo = {
+            match png_from_base64_str(&payload_logo) {
+                Ok(img) => img,
                 Err(e) => {
-                    error!("Could not encrypt {}: {}", screen_image_path.display(), e)
+                    return format!("Banner image provided is not an valid image! Err: {e}")
+                        .to_string();
                 }
+            }
+        };
+
+        let image_file = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        let img_path = image_file.path().display().to_string();
+        if let Some(logo) = logo {
+            save_png_best_compression(&logo, &img_path).unwrap();
+            info!("Generating logo AssetBundle");
+            match generate_logo(logo_ab_path.clone(), FPath::new(&img_path).to_path_buf()) {
+                Ok(_) => {}
+                Err(e) => error!("Failed to generate logo! Default will be used. Err: {e}"),
             };
         }
-        Err(e) => error!("Failed to generate screen_image! Default will be used. Err: {e}"),
-    };
 
-    // Copy template and generate new logo assetbundle in place of the copied original assetbundle
-    let logo_ab_path = format!("mods/{mod_name}-logo.ab");
-    tokio::fs::copy("assets/event/logo/logo", &logo_ab_path)
-        .await
-        .unwrap();
+        // Encrypt logo AssetBundle, be it the template or newly generated AssetBundle
+        info!("Encrypting new AssetBundle {}", &logo_ab_path);
 
-    modpack.invalidated_assets.push(InvalidateCacheEntry {
-        resource_path: "event/event_whip_2024/logo".to_string(),
-        duration: CacheInvalidDuration::PermanentlyInvalid,
-    });
-
-    modpack.injected_assets.insert(
-        "event/event_whip_2024/logo".to_string(),
-        logo_ab_path.clone(),
-    );
-
-    // Save image to temp path since generate_logo requires an path (which is needed because UnityPy requires it)
-
-    let logo = {
-        match png_from_base64_str(payload.logo) {
-            Ok(img) => img,
-            Err(e) => {
-                return format!("Banner image provided is not an valid image! Err: {e}")
-                    .to_string();
+        let logo_ab_path = FPath::new(&logo_ab_path);
+        match encrypt(logo_ab_path, logo_ab_path) {
+            Ok(_) => {
+                info!("Encrypted AssetBundle")
             }
-        }
-    };
-
-    let image_file = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
-    let img_path = image_file.path().display().to_string();
-    if let Some(logo) = logo {
-        save_png_best_compression(&logo, &img_path).unwrap();
-        info!("Generating logo AssetBundle");
-        match generate_logo(logo_ab_path.clone(), FPath::new(&img_path).to_path_buf()).await {
-            Ok(_) => {}
-            Err(e) => error!("Failed to generate logo! Default will be used. Err: {e}"),
+            Err(e) => {
+                error!("Could not encrypt {}: {}", logo_ab_path.display(), e)
+            }
         };
-    }
 
-    // Encrypt logo AssetBundle, be it the template or newly generated AssetBundle
-    info!("Encrypting new AssetBundle {}", &logo_ab_path);
-
-    let logo_ab_path = FPath::new(&logo_ab_path);
-    match encrypt(logo_ab_path, logo_ab_path) {
-        Ok(_) => {
-            info!("Encrypted AssetBundle")
-        }
-        Err(e) => {
-            error!("Could not encrypt {}: {}", logo_ab_path.display(), e)
-        }
-    };
-
-    let file_name = {
-        if payload.file_name.contains(".toml") {
-            payload.file_name
-        } else {
-            format!("{}.toml", payload.file_name)
-        }
-    };
-
-    let output_file_path = format!("mods/{file_name}");
-    let output_file = fPath::new(&output_file_path);
-
-    if !fPath::new("mods").exists() {
-        match create_dir("mods") {
-            Ok(_) => {}
-            Err(e) => {
-                error!(
-                    "Could not create mods dir, will try to continue with saving but will likely fail! Err: {e}"
-                )
+        let file_name = {
+            if payload_file_name.contains(".toml") {
+                payload_file_name
+            } else {
+                format!("{}.toml", payload_file_name)
             }
-        }
-    }
+        };
 
-    if output_file.exists() {
-        return format!(
-            "{} already exists! Please rename your file.",
-            output_file.display()
-        );
-    } else {
-        match toml::to_string_pretty(&modpack) {
-            Ok(toml) => match std::fs::write(output_file, toml) {
-                Ok(_) => {
-                    info!(
-                        "Succesfully generated and saved modpack to {}",
-                        output_file.canonicalize().unwrap().display()
-                    );
-                    info!(
-                        "Successfully generated modpack! It was placed in {}",
-                        output_file.canonicalize().unwrap().display()
+        let output_file_path = format!("mods/{file_name}");
+        let output_file = fPath::new(&output_file_path);
+
+        if !fPath::new("mods").exists() {
+            match create_dir("mods") {
+                Ok(_) => {}
+                Err(e) => {
+                    error!(
+                        "Could not create mods dir, will try to continue with saving but will likely fail! Err: {e}"
                     )
                 }
-                Err(e) => {
-                    return format!("Failed to write to {:?}: {e}", output_file.canonicalize());
-                }
-            },
-            Err(e) => return format!("Failed to serialize modpack into TOML: {e}"),
-        }
-    }
-
-    info!("Creating scenario");
-    match create_assetbundle(
-        modpack,
-        Some(std::path::Path::new(mod_ab_path).to_path_buf()),
-        true,
-    ) {
-        Ok(_) => {
-            // Modifies injections-ab with required paths
-            info!("Reloading injections!");
-            match reload_injections(&config) {
-                Ok(_) => {
-                    info!(
-                        "Reloading assetbundle info hashes! This may trigger multiple redownloads within the game."
-                    );
-
-                    match reload_assetbundle_info(&config, &asset_version).await {
-                        Ok(_) => {
-                            let msg = "Succesfully generated modpack and AssetBundle!".to_string();
-                            info!("{msg}");
-                            msg
-                        }
-                        Err(e) => {
-                            let msg = format!("Failed to reload assetbundle info! Err: {e}");
-                            error!("{msg}");
-                            msg
-                        }
-                    }
-                }
-                Err(e) => {
-                    let msg = format!("Failed to reload injections! Err: {e}");
-                    error!("{msg}");
-                    msg
-                }
             }
         }
-        Err(e) => format!("Failed to convert modpack to AssetBundle: {e}"),
-    }
+
+        if output_file.exists() {
+            return format!(
+                "{} already exists! Please rename your file.",
+                output_file.display()
+            );
+        } else {
+            match toml::to_string_pretty(&modpack) {
+                Ok(toml) => match std::fs::write(output_file, toml) {
+                    Ok(_) => {
+                        info!(
+                            "Succesfully generated and saved modpack to {}",
+                            output_file.canonicalize().unwrap().display()
+                        );
+                        info!(
+                            "Successfully generated modpack! It was placed in {}",
+                            output_file.canonicalize().unwrap().display()
+                        )
+                    }
+                    Err(e) => {
+                        return format!("Failed to write to {:?}: {e}", output_file.canonicalize());
+                    }
+                },
+                Err(e) => return format!("Failed to serialize modpack into TOML: {e}"),
+            }
+        }
+
+        info!("Creating scenario");
+        match create_assetbundle(
+            modpack,
+            Some(std::path::Path::new(&mod_ab_path).to_path_buf()),
+            true,
+        ) {
+            Ok(_) => {
+                // Modifies injections-ab with required paths
+                info!("Reloading injections!");
+                match reload_injections(&config) {
+                    Ok(_) => {
+                        info!(
+                            "Reloading assetbundle info hashes! This may trigger multiple redownloads within the game."
+                        );
+
+                        match reload_assetbundle_info(&config, &asset_version) {
+                            Ok(_) => {
+                                let msg = "Succesfully generated modpack and AssetBundle!".to_string();
+                                info!("{msg}");
+                                msg
+                            }
+                            Err(e) => {
+                                let msg = format!("Failed to reload assetbundle info! Err: {e}");
+                                error!("{msg}");
+                                msg
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let msg = format!("Failed to reload injections! Err: {e}");
+                        error!("{msg}");
+                        msg
+                    }
+                }
+            }
+            Err(e) => format!("Failed to convert modpack to AssetBundle: {e}"),
+        }
+    })
+    .await
+    .expect("generate_screen_image blocking task failed")
 }
 
 // Needed because UnityPy seems to take a very long time with images
@@ -910,17 +577,13 @@ fn save_png_best_compression(
     let (width, height) = rgba8.dimensions();
 
     // Use best compression + adaptive filtering
-    let encoder = PngEncoder::new_with_quality(
-        file,
-        CompressionType::Best, // max DEFLATE compression
-        FilterType::Adaptive,  // usually smallest files
-    );
+    let encoder = PngEncoder::new_with_quality(file, CompressionType::Best, FilterType::Adaptive);
 
     encoder.write_image(&rgba8, width, height, image::ExtendedColorType::Rgba8)?;
     Ok(())
 }
 
-fn png_from_base64_str(base64: Option<String>) -> Result<Option<DynamicImage>> {
+fn png_from_base64_str(base64: &Option<String>) -> Result<Option<DynamicImage>> {
     if let Some(base64) = base64 {
         let image_bytes = BASE64_STANDARD.decode(base64.as_bytes())?;
         let img = load_from_memory(&image_bytes)?;
@@ -930,14 +593,6 @@ fn png_from_base64_str(base64: Option<String>) -> Result<Option<DynamicImage>> {
         Ok(Some(load_from_memory(&image_buffer.into_inner())?))
     } else {
         Ok(None)
-    }
-}
-
-fn capitalize(s: &str) -> String {
-    let mut c = s.chars();
-    match c.next() {
-        None => String::new(),
-        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
     }
 }
 

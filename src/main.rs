@@ -47,7 +47,10 @@ use rust_embed::Embed;
 use sekai_injector::{Config, Domain, Manager, ServerStatistics, load_injection_maps, serve};
 use serde::Deserialize;
 use simple_dns_server::{Config as DConfig, RecordInfo, RecordType, SimpleDns};
-use tokio::{sync::RwLock, task};
+use tokio::{
+    sync::RwLock,
+    task::{self, spawn_blocking},
+};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use utils::Config as MMLConfig;
@@ -502,14 +505,17 @@ async fn main() {
                 .await
                 .unwrap();
 
-            generate_screen_image(
-                &screen_image_path,
-                options.banner_event_story,
-                options.story_bg,
-                options.story_title,
-            )
+            spawn_blocking(move || {
+                generate_screen_image(
+                    &screen_image_path,
+                    options.banner_event_story,
+                    options.story_bg,
+                    options.story_title,
+                )
+                .unwrap();
+            })
             .await
-            .unwrap();
+            .expect("generate_screen_image blocking task failed");
         }
 
         // If we are generating the logo
@@ -521,12 +527,15 @@ async fn main() {
                 .await
                 .unwrap();
 
-            generate_logo(
-                logo_assetbundle_path,
-                options.logo_path.expect("New logo path must be set"),
-            )
+            spawn_blocking(move || {
+                generate_logo(
+                    logo_assetbundle_path,
+                    options.logo_path.expect("New logo path must be set"),
+                )
+                .unwrap();
+            })
             .await
-            .unwrap();
+            .expect("generate_logo blocking task failed");
         }
 
         return;
@@ -623,10 +632,14 @@ async fn main() {
         }
     };
 
-    match update_assets(&config_holder, data_version).await {
-        Ok(_) => {}
-        Err(e) => error!("Could not update assets: {e}\n"),
-    };
+    if !config_holder.disable_asset_updates.unwrap_or(false) {
+        match update_assets(&config_holder, data_version).await {
+            Ok(_) => {}
+            Err(e) => error!("Could not update assets: {e}\n"),
+        };
+    } else {
+        info!("Skipping asset update")
+    }
 
     // Now that we have the asset version we can check if the user wants to reload the abinfo and exit
     if let Some(Command::ReloadAbInfo(ref _options)) = opts.command {
@@ -634,9 +647,11 @@ async fn main() {
             "Reloading assetbundle info hashes! This may trigger multiple redownloads within the game."
         );
 
-        reload_assetbundle_info(&config_holder, &asset_version)
-            .await
-            .unwrap();
+        spawn_blocking(move || {
+            reload_assetbundle_info(&config_holder, &asset_version).unwrap();
+        })
+        .await
+        .expect("reload_assetbundle_info blocking task failed");
         return;
     }
 
@@ -649,9 +664,16 @@ async fn main() {
         create_dir("mods").expect("Can not create mods directory");
     }
 
-    reload_assetbundle_info(&config_holder, &asset_version)
-        .await
-        .unwrap();
+    let cloned_config_holder = config_holder.clone();
+    let cloned_asset_version = asset_version.clone();
+    spawn_blocking(move || {
+        match reload_assetbundle_info(&cloned_config_holder, &cloned_asset_version) {
+        Ok(_) => {}
+        Err(e) => error!(
+            "Failed to reload assetbundle info. The game may not redownload required assets or start properly! Err: {e}"
+        ),
+    }
+    }).await.expect("reload_assetbundle_info blocking task failed");
 
     let mut sekai_injector_enabled = true;
 
@@ -996,7 +1018,7 @@ pub async fn update_assets(
                 debug!("{} ETag: {}", asset, etag.to_str().unwrap());
                 new_etag_val = Some(etag.to_str().unwrap());
             } else {
-                warn!("Upstream server doesn't support etag, redownloading asset {url}! Provided headers: {:?}", resp.headers());
+                error!("Upstream server doesn't support etag, asset url is probably out of date, redownloading asset {url}! Provided headers: {:?}", resp.headers());
             }
 
             let existing_etag_path = format!("{}/{asset}.etag", asset_config.asset_path);
